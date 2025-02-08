@@ -77,6 +77,7 @@ handling question answering through server-sent events (SSE).
 """
 
 import logging
+
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -95,15 +96,13 @@ class AgentProcessingRequest(BaseModel):
     Attributes:
         question (str): The question to be processed by the agent
     """
+
     question: str = Field(..., description="The question to be answered by the agent")
 
     class Config:
         """Pydantic model configuration"""
-        json_schema_extra = {
-            "example": {
-                "question": "What is the capital of France?"
-            }
-        }
+
+        json_schema_extra = {"example": {"question": "What is the capital of France?"}}
 
 
 # Create router with prefix and tags for API documentation
@@ -165,13 +164,13 @@ async def generate_response(request: AgentProcessingRequest) -> StreamingRespons
             logger.error("Empty question in request")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Question cannot be empty."
+                detail="Question cannot be empty.",
             )
 
         # Generate streaming response
         response = StreamingResponse(
             agent_service.stream_response(request.question),
-            media_type="text/event-stream"
+            media_type="text/event-stream",
         )
 
         # Log successful processing
@@ -183,6 +182,5 @@ async def generate_response(request: AgentProcessingRequest) -> StreamingRespons
         error_msg = f"Error processing question: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=error_msg
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
         )

@@ -24,7 +24,6 @@ class State(TypedDict):
     # The "messages" key holds a list of conversation messages.
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
-
 class AgentService:
     """
     AgentService integrates document retrieval with a LangGraph streaming response.
@@ -54,8 +53,8 @@ class AgentService:
             """
             logger.info("Invoking LLM in chatbot node with state messages.")
             # Call the LLM synchronously using the current conversation messages.
-            logger.info(f"Message sent to model: {state['messages']}")
-            response = self.llm.invoke(state["messages"])
+            logger.info(f"Message sent to model: {state['messages'][-6:]}")
+            response = self.llm.invoke(state["messages"][-6:])
             # Return the response wrapped in a dictionary under "messages".
             return {"messages": [response]}
 
