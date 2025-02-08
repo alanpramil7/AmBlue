@@ -31,6 +31,7 @@ AmBlue
    - IndexerService: Manages document processing and embedding
    - WebsiteService: Handles website crawling and content extraction
    - WikiService: Manages Azure DevOps wiki content retrieval
+   - AgentService: Handles RAG-based question answering
    - Vector Store: Manages document embeddings storage
 
 3. **Infrastructure Layer**
@@ -50,7 +51,7 @@ AmBlue
 ## Key Components Interaction
 
 ```plaintext
-Client → FastAPI → WebsiteService → IndexerService → VectorStore
+Client → FastAPI → AgentService → IndexerService → VectorStore → LLM
 ```
 
 ## Technical Decisions

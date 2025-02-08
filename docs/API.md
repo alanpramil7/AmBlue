@@ -100,6 +100,33 @@ Processes and indexes document files (PDF, DOCX).
 - PDF (.pdf)
 - Microsoft Word (.docx)
 
+### Agent Response Generation
+
+```http
+POST /agent
+```
+
+Generates a streaming response for a given question using the RAG agent.
+
+**Request Body**
+
+```json
+{
+  "question": "What is the capital of France?"
+}
+```
+
+**Response**
+
+- Content-Type: text/event-stream
+- Streaming response with Server-Sent Events (SSE)
+
+Example event:
+
+```text
+data: The capital of France is Paris.
+```
+
 ## Error Responses
 
 | Status Code | Description                               |

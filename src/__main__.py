@@ -6,14 +6,15 @@ sets up environment variables, and provides the main entry point
 for running the service.
 """
 
-import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
-
-from src.routes import document, website, wiki
 
 # Load environment variables from .env file at startup
 load_dotenv()
+
+import uvicorn
+from fastapi import FastAPI
+
+from src.routes import agent, document, website, wiki
 
 
 def create_app() -> FastAPI:
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     application.include_router(website.router)
     application.include_router(wiki.router)
     application.include_router(document.router)
+    application.include_router(agent.router)
 
     return application
 

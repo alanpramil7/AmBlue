@@ -39,14 +39,6 @@ AmBlue allows users to:
 ## Quick Start
 
 1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
+2. Install dependencies: `uv sync`
 3. Set up environment variables
-4. Run the application: `python -m agent.src.__main__`
-
-## License
-
-[Add License Information]
-
-## Contributing
-
-[Add Contributing Guidelines]
+4. Run the application: `uvicorn src.__main__:app --reload`

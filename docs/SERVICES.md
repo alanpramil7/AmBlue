@@ -239,3 +239,59 @@ Handles document file processing and indexing operations.
 - File integrity checks
 - Comprehensive error logging
 - Clean temporary file management
+
+## AgentService
+
+Manages the integration between document retrieval and LLM-powered response generation using LangGraph.
+
+### Components
+
+1. **State Graph**
+
+   - Implementation: LangGraph StateGraph
+   - Purpose: Manages conversation flow and LLM interactions
+   - Features:
+     - Checkpointing with MemorySaver
+     - Structured message handling
+     - Async streaming support
+
+2. **Language Model**
+   - Implementation: Groq/Ollama integration
+   - Models:
+     - Primary: deepseek-r1-distill-llama-70b
+     - Alternative: deepseek-r1:14b
+   - Features:
+     - Streaming response generation
+     - Context-aware responses
+     - State management
+
+### Key Methods
+
+- `stream_response(user_input: str)`
+
+  - Purpose: Generates streaming responses to user questions
+  - Features:
+    - Async response generation
+    - Document retrieval integration
+    - SSE formatting
+    - Error handling
+
+- `_retrieve_docs(query: str)`
+  - Purpose: Retrieves relevant documents for context
+  - Features:
+    - Vector similarity search
+    - Configurable retrieval parameters
+    - Document ranking
+
+### Integration Points
+
+- Combines with IndexerService for document retrieval
+- Integrates with vector store for similarity search
+- Supports streaming responses via FastAPI endpoints
+
+### Error Handling
+
+- Comprehensive error logging
+- Runtime error detection
+- State validation
+- Stream integrity checks
