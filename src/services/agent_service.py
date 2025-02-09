@@ -44,6 +44,7 @@ class AgentService:
         # Initialize the language model instance.
         # self.llm = ChatOllama(model="deepseek-r1:14b")
         self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
+        # self.llm = ChatOllama(model="llama3.2")
 
         # Define the chatbot node function for the graph.
         def chatbot_node(state: State) -> State:
@@ -53,8 +54,8 @@ class AgentService:
             """
             logger.info("Invoking LLM in chatbot node with state messages.")
             # Call the LLM synchronously using the current conversation messages.
-            logger.info(f"Message sent to model: {state['messages'][-6:]}")
-            response = self.llm.invoke(state["messages"][-6:])
+            logger.info(f"Message sent to model: {state['messages'][-3:]}")
+            response = self.llm.invoke(state["messages"][-3:])
             # Return the response wrapped in a dictionary under "messages".
             return {"messages": [response]}
 
@@ -140,16 +141,15 @@ class AgentService:
         logger.info("Starting to stream response from the state graph.")
 
         # Stream the response asynchronously using the state graph's astream method.
+        think_tag_open = False
         async for msg, metadata in self.graph.astream(
             state, config, stream_mode="messages"
         ):
             # If the streamed message has content, yield it.
-            # if hasattr(msg, "content") and msg.content:
-            #     # logger.info(f"Streaming chunk: {msg.content}")
-            #     yield msg.content
-            if isinstance(msg, BaseMessage):
-                if msg.content:
-                    if isinstance(msg.content, str):
-                        yield msg.content
-                    else:
-                        yield str(msg.content)  # Convert non-string content to string
+            if msg.content == "<think>":
+                think_tag_open = True
+            elif msg.content == "</think>":
+                think_tag_open = False
+            elif not think_tag_open:
+                print(msg.content)
+                yield msg.content
