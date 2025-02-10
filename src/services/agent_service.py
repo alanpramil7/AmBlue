@@ -43,8 +43,8 @@ class AgentService:
 
         # Initialize the language model instance.
         # self.llm = ChatOllama(model="deepseek-r1:14b")
-        # self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
-        self.llm = ChatOllama(model="llama3.2")
+        self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
+        # self.llm = ChatOllama(model="llama3.2")
 
         # Define the chatbot node function for the graph.
         def chatbot_node(state: State) -> State:
@@ -54,7 +54,7 @@ class AgentService:
             """
             logger.info("Invoking LLM in chatbot node with state messages.")
             # Call the LLM synchronously using the current conversation messages.
-            logger.info(f"Message sent to model: {state['messages'][-3:]}")
+            # logger.info(f"Message sent to model: {state['messages'][-3:]}")
             response = self.llm.invoke(state["messages"][-3:])
             # Return the response wrapped in a dictionary under "messages".
             return {"messages": [response]}
@@ -81,7 +81,7 @@ class AgentService:
         logger.info(f"Retrieving documents for query: {query}")
 
         # Define search parameters (for example, retrieve the top 5 relevant docs).
-        search_kwargs = {"k": 5}
+        search_kwargs = {"k": 3}
 
         # Ensure that the vector store has been initialized.
         if not self.indexer.vector_store:
@@ -95,10 +95,10 @@ class AgentService:
         # Retrieve documents for the given query.
         docs = retriever.invoke(query)
 
-        for i, doc in enumerate(docs):
-            logger.info(
-                f"----------Documument {i}---------------------\n {doc.page_content}"
-            )
+        # for i, doc in enumerate(docs):
+        #     logger.info(
+        #         f"----------Documument {i}---------------------\n {doc.page_content}"
+        #     )
 
         logger.info(f"Retrieved {len(docs)} documents for query: {query}")
         return docs
@@ -121,11 +121,21 @@ class AgentService:
         # Start building the conversation messages.
         messages = []
         if docs:
-            # Combine the retrieved document contents to form context.
+            # Combine the retrieved document contents to form context
             context = "\n\n".join([doc.page_content for doc in docs])
             system_message = {
-                "role": "system",
-                "content": f"Use the following context to answer the question:\n{context}",
+            "role": "system",
+            "content": f"""You are a helpful assistant. Here's how to respond:
+
+                1. If the question is general, answer it directly using your knowledge.
+
+                2. If the question requires specific information, use this context to help answer:
+                {context}
+
+                3. If the question is too specific and the context doesn't provide enough information, 
+                politely ask the user to clarify or rephrase their question.
+
+                Please ensure your responses are accurate and helpful."""
             }
             messages.append(system_message)
 
