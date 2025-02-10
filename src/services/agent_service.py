@@ -43,8 +43,8 @@ class AgentService:
 
         # Initialize the language model instance.
         # self.llm = ChatOllama(model="deepseek-r1:14b")
-        self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
-        # self.llm = ChatOllama(model="llama3.2")
+        # self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
+        self.llm = ChatOllama(model="llama3.2")
 
         # Define the chatbot node function for the graph.
         def chatbot_node(state: State) -> State:

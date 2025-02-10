@@ -13,6 +13,7 @@ load_dotenv()
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.routes import agent, document, website, wiki
 
@@ -34,6 +35,14 @@ def create_app() -> FastAPI:
         # Additional FastAPI configurations can be added here
         docs_url="/docs",  # Swagger UI endpoint
         redoc_url="/redoc",  # ReDoc endpoint
+    )
+    
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @application.get(
@@ -75,7 +84,7 @@ if __name__ == "__main__":
     """
     uvicorn.run(
         app=app,
-        host="localhost",  # Local development host
+        host="0.0.0.0",
         port=8000,  # Default port for the service
         reload=True,  # Enable auto-reload for development
         log_level="info",  # Set logging level
