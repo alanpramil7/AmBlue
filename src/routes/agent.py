@@ -12,10 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.services.agent_service import AgentService
-from src.utils.logger import get_logger
-
-# Initialize logger for the routes
-logger = get_logger("AgentRoutes", logging.INFO)
+from src.utils.logger import logger
 
 
 class AgentProcessingRequest(BaseModel):

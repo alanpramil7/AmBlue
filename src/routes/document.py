@@ -13,10 +13,7 @@ from pydantic import BaseModel
 from src.services.document_service import process_document
 from src.services.indexer_service import IndexerService
 from src.utils.dependency import get_indexer
-from src.utils.logger import get_logger
-
-# Initialize logger for the routes
-logger = get_logger("DocumentRoutes")
+from src.utils.logger import logger
 
 
 class DocumentProcessRequest(BaseModel):

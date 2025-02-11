@@ -7,10 +7,7 @@ from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 
-from src.utils.logger import get_logger
-
-# Initialize logger for the IndexerService
-logger = get_logger("IndexerService", logging.INFO)
+from src.utils.logger import logger
 
 
 class IndexerService:

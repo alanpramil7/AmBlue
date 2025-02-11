@@ -14,10 +14,7 @@ from pydantic import BaseModel, HttpUrl
 from src.services.indexer_service import IndexerService
 from src.services.website_service import WebsiteIndexer
 from src.utils.dependency import get_indexer
-from src.utils.logger import get_logger
-
-# Initialize logger for the routes
-logger = get_logger("WebsiteRoutes")
+from src.utils.logger import logger
 
 
 class WebsiteProcessRequest(BaseModel):

@@ -13,11 +13,7 @@ from langgraph.graph.message import BaseMessage, add_messages
 from typing_extensions import TypedDict
 
 from src.utils.dependency import get_indexer
-from src.utils.logger import get_logger
-
-# Initialize logger for the AgentService.
-logger = get_logger("AgentService", logging.INFO)
-
+from src.utils.logger import logger
 
 # Define the structure of the state that the graph will use.
 class State(TypedDict):
@@ -44,8 +40,8 @@ class AgentService:
 
         # Initialize the language model instance.
         # self.llm = ChatOllama(model="deepseek-r1:14b")
-        self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
-        # self.llm = ChatOllama(model="llama3.2")
+        # self.llm = ChatGroq(model="deepseek-r1-distill-llama-70b")
+        self.llm = ChatOllama(model="llama3.2")
 
         # Define the chatbot node function for the graph.
         def chatbot_node(state: State) -> State:

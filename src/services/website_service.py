@@ -8,9 +8,7 @@ import aiohttp
 from langchain_community.document_loaders import WebBaseLoader
 
 from src.services.indexer_service import IndexerService
-from src.utils.logger import get_logger
-
-logger = get_logger("WebsiteService", logging.INFO)
+from src.utils.logger import logger
 
 
 class WebsiteIndexer:
@@ -103,6 +101,7 @@ class WebsiteIndexer:
         # Fetch sitemap URLs or use base URL
         urls = await self._fetch_sitemap(base_url) or [base_url]
 
+        urls = urls[:20]
         # Process URLs concurrently with rate limiting
         tasks = [self._process_url(url) for url in urls]
         await asyncio.gather(*tasks)

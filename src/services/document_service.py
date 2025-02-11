@@ -10,10 +10,7 @@ from langchain_core.documents.base import Document
 
 from src.services.indexer_service import IndexerService
 from src.utils.dependency import get_indexer
-from src.utils.logger import get_logger
-
-# Initialize logger
-logger = get_logger("DocumentService", logging.INFO)
+from src.utils.logger import logger
 
 
 class DocumentService:

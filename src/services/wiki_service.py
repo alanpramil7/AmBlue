@@ -18,11 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from src.utils.logger import get_logger
-
-# Initialize logger with detailed formatting
-logger = get_logger("WikiService", logging.INFO)
-
+from src.utils.logger import logger
 
 @dataclass
 class WikiPage:
