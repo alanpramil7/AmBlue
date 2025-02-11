@@ -1,41 +1,40 @@
+import asyncio
 import logging
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Dict, List, Union
 
-from fastapi import UploadFile
+import aiofiles
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
 from langchain_core.documents.base import Document
 
+from src.services.indexer_service import IndexerService
 from src.utils.dependency import get_indexer
 from src.utils.logger import get_logger
 
-# Initialize logger for the module (removed duplicate initialization)
+# Initialize logger
 logger = get_logger("DocumentService", logging.INFO)
 
 
 class DocumentService:
-    """
-    Service class for handling document processing operations including loading and indexing.
-    Supports multiple document formats and provides vector store indexing capabilities.
-    """
+    """Service class for handling concurrent document processing operations."""
 
     def __init__(self):
-        """
-        Initialize DocumentService with required dependencies and supported file formats.
-        Sets up the indexer and defines supported document extensions.
-        """
+        """Initialize DocumentService with dependencies and supported formats."""
         logger.info("Initializing DocumentService")
         self.indexer = get_indexer()
-        # Dictionary mapping file extensions to their respective loader classes
         self.supported_extensions = {"pdf": PyPDFLoader, "docx": Docx2txtLoader}
+        # Semaphore to limit concurrent processing
+        self.semaphore = asyncio.Semaphore(
+            5
+        )  # Adjust number based on your server capacity
         logger.info(
             f"Supported file extensions: {', '.join(self.supported_extensions.keys())}"
         )
 
-    def _create_document(self, file_path: str) -> List[Document]:
+    async def _create_document(self, file_path: str) -> List[Document]:
         """
-        Create document objects from the input file.
+        Create document objects from the input file asynchronously.
 
         Args:
             file_path (str): Path to the document file
@@ -48,7 +47,6 @@ class DocumentService:
         """
         logger.info(f"Creating document objects from file: {file_path}")
 
-        # Extract and validate file extension
         extension = Path(file_path).suffix.lower().lstrip(".")
         logger.debug(f"Detected file extension: {extension}")
 
@@ -60,21 +58,21 @@ class DocumentService:
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        # Load document using appropriate loader
         loader_class = self.supported_extensions[extension]
         logger.info(f"Using loader class: {loader_class.__name__}")
 
         try:
-            documents = loader_class(file_path).load()
+            # Run document loading in a thread pool
+            documents = await asyncio.to_thread(loader_class(file_path).load)
             logger.info(f"Successfully created {len(documents)} document objects")
             return documents
         except Exception as e:
             logger.error(f"Failed to load document: {str(e)}")
             raise
 
-    def index_document(self, file_path: str) -> Dict[str, Union[str, int]]:
+    async def process_document(self, file_path: str) -> Dict[str, Union[str, int]]:
         """
-        Process and index the document into the vector store.
+        Process and index a document with concurrent processing support.
 
         Args:
             file_path (str): Path to the document file
@@ -85,44 +83,51 @@ class DocumentService:
         Raises:
             RuntimeError: If indexer components are not properly initialized
         """
-        logger.info(f"Starting document indexing process for: {file_path}")
+        async with self.semaphore:  # Limit concurrent processing
+            logger.info(f"Starting document processing for: {file_path}")
 
-        # Validate indexer components
-        if not self.indexer.text_splitter or not self.indexer.vector_store:
-            error_msg = "Indexer components not properly initialized"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
+            if not self.indexer.text_splitter or not self.indexer.vector_store:
+                error_msg = "Indexer components not properly initialized"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
 
-        try:
-            # Document processing pipeline
-            docs = self._create_document(file_path)
-            logger.info("Splitting documents into chunks...")
-            chunks = self.indexer.text_splitter.split_documents(docs)
-            logger.info(f"Created {len(chunks)} chunks from the document")
+            try:
+                # Document processing pipeline with async operations
+                docs = await self._create_document(file_path)
 
-            logger.info("Adding chunks to vector store...")
-            self.indexer.vector_store.add_documents(chunks)
-            logger.info("Successfully added chunks to vector store")
+                logger.info("Splitting documents into chunks...")
+                chunks = await asyncio.to_thread(
+                    self.indexer.text_splitter.split_documents, docs
+                )
+                logger.info(f"Created {len(chunks)} chunks from the document")
 
-            result = {
-                "message": "Document processed successfully",
-                "file_name": Path(file_path).name,
-                "chunks": len(chunks),
-            }
-            logger.info(f"Document processing completed: {result}")
-            return result
+                logger.info("Adding chunks to vector store...")
+                await asyncio.to_thread(self.indexer.vector_store.add_documents, chunks)
+                logger.info("Successfully added chunks to vector store")
 
-        except Exception as e:
-            logger.error(f"Failed to process document: {str(e)}")
-            raise
+                return {
+                    "status": "success",
+                    "message": "Document processed successfully",
+                    "file_name": Path(file_path).name,
+                    "chunks": len(chunks),
+                }
+
+            except Exception as e:
+                logger.error(f"Failed to process document: {str(e)}")
+                raise
 
 
-async def process_document(file: UploadFile) -> Dict[str, Union[str, int]]:
+async def process_document(
+    content: bytes, file_name: str, content_type: str, indexer: IndexerService
+) -> Dict[str, Union[str, int]]:
     """
-    Asynchronously process an uploaded document.
+    Process a document with support for concurrent requests.
 
     Args:
-        file (UploadFile): The uploaded file object
+        content (bytes): The file content
+        file_name (str): Original file name
+        content_type (str): File content type
+        indexer (IndexerService): The indexer service instance
 
     Returns:
         Dict[str, Union[str, int]]: Processing result
@@ -130,27 +135,23 @@ async def process_document(file: UploadFile) -> Dict[str, Union[str, int]]:
     Raises:
         RuntimeError: If document processing fails
     """
-    logger.info(f"Starting async document processing for file: {file.filename}")
+    logger.info(f"Processing document: {file_name}")
     document_service = DocumentService()
 
-    if not file.filename:
+    if not file_name:
         raise ValueError("No file name provided.")
 
-    extension = Path(file.filename).suffix
+    extension = Path(file_name).suffix
 
-    with NamedTemporaryFile(delete=True, suffix=extension) as temp_file:
+    with NamedTemporaryFile(delete=False, suffix=extension) as temp_file:
         try:
-            # Handle file upload
-            logger.info("Reading uploaded file content...")
-            content = await file.read()
-
-            logger.info("Writing content to temporary file...")
-            temp_file.write(content)
-            temp_file.flush()
+            # Write content to temporary file
+            async with aiofiles.open(temp_file.name, "wb") as temp_async_file:
+                await temp_async_file.write(content)
             logger.debug(f"Temporary file created at: {temp_file.name}")
 
             # Process the document
-            result = document_service.index_document(temp_file.name)
+            result = await document_service.process_document(temp_file.name)
             logger.info("Document processing completed successfully")
             return result
 
@@ -158,3 +159,9 @@ async def process_document(file: UploadFile) -> Dict[str, Union[str, int]]:
             error_msg = f"Document processing failed: {str(e)}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
+        finally:
+            # Clean up temporary file
+            try:
+                Path(temp_file.name).unlink()
+            except Exception as e:
+                logger.error(f"Error cleaning up temporary file: {e}")

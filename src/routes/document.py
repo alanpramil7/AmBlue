@@ -2,7 +2,7 @@
 Document Routes Module
 
 This module defines the API routes for document processing operations,
-including file upload and indexing endpoints.
+with support for concurrent document processing from multiple users.
 """
 
 from typing import Any, Dict
@@ -20,17 +20,11 @@ logger = get_logger("DocumentRoutes")
 
 
 class DocumentProcessRequest(BaseModel):
-    """
-    Request model for document processing.
-
-    Attributes:
-        file (UploadFile): The uploaded file to be processed
-    """
+    """Request model for document processing."""
 
     file: UploadFile
 
 
-# Create router with prefix and tags for API documentation
 router = APIRouter(
     prefix="/document",
     tags=["document"],
@@ -44,6 +38,7 @@ router = APIRouter(
 @router.post(
     "/",
     response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid request parameters"},
         status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Invalid file format"},
@@ -53,7 +48,7 @@ async def process_document_endpoint(
     file: UploadFile = File(...), indexer: IndexerService = Depends(get_indexer)
 ) -> Dict[str, Any]:
     """
-    Process an uploaded document file.
+    Process an uploaded document file synchronously with concurrent user support.
 
     Args:
         file (UploadFile): The uploaded file to process
@@ -70,11 +65,17 @@ async def process_document_endpoint(
 
         if not file:
             raise HTTPException(
-                status=400, detail="File not found, Please upload the file to process"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File not found. Please upload the file to process",
             )
 
-        # Process the document and await the result
-        result = await process_document(file)
+        # Read file content
+        content = await file.read()
+
+        # Process the document and wait for result
+        result = await process_document(
+            content, file.filename, file.content_type, indexer
+        )
 
         logger.info(f"Successfully processed document: {file.filename}")
         return result
@@ -82,8 +83,6 @@ async def process_document_endpoint(
     except Exception as e:
         error_msg = f"Error processing document {file.filename}: {str(e)}"
         logger.error(error_msg)
-
-        # Raise HTTP exception with detailed error message
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_msg,
