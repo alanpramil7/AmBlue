@@ -36,7 +36,7 @@ def create_app() -> FastAPI:
         docs_url="/docs",  # Swagger UI endpoint
         redoc_url="/redoc",  # ReDoc endpoint
     )
-    
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

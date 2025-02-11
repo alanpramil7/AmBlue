@@ -24,6 +24,7 @@ class State(TypedDict):
     # The "messages" key holds a list of conversation messages.
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
+
 class AgentService:
     """
     AgentService integrates document retrieval with a LangGraph streaming response.
@@ -124,8 +125,8 @@ class AgentService:
             # Combine the retrieved document contents to form context
             context = "\n\n".join([doc.page_content for doc in docs])
             system_message = {
-            "role": "system",
-            "content": f"""You are a helpful assistant. Here's how to respond:
+                "role": "system",
+                "content": f"""You are a helpful assistant. Here's how to respond:
 
                 1. If the question is general, answer it directly using your knowledge.
 
@@ -135,7 +136,7 @@ class AgentService:
                 3. If the question is too specific and the context doesn't provide enough information, 
                 politely ask the user to clarify or rephrase their question.
 
-                Please ensure your responses are accurate and helpful."""
+                Please ensure your responses are accurate and helpful.""",
             }
             messages.append(system_message)
 
