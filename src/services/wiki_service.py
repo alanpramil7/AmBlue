@@ -11,6 +11,7 @@ Key Features:
 - Robust error handling and logging
 """
 
+import asyncio
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -72,7 +73,7 @@ class WikiClient:
         self.api_version = "7.1"
         logger.info(f"Base URL configured: {self.base_url}")
 
-    def _make_api_request(
+    async def _make_api_request(
         self, params: Dict[str, Any], method: str = "GET"
     ) -> Optional[Dict[str, Any]]:
         """
@@ -92,7 +93,10 @@ class WikiClient:
             params["api-version"] = self.api_version
 
             if method == "GET":
-                response = requests.get(self.base_url, params=params, auth=self.auth)
+                # Use asyncio.to_thread to run the blocking requests.get in a separate thread
+                response = await asyncio.to_thread(
+                    requests.get, self.base_url, params=params, auth=self.auth
+                )
             else:
                 logger.error(f"Unsupported HTTP method: {method}")
                 raise ValueError(f"Unsupported HTTP method: {method}")
@@ -106,7 +110,7 @@ class WikiClient:
             logger.info(f"Request details - URL: {self.base_url}, Params: {params}")
             return None
 
-    def _get_page_content(self, page_path: str) -> str:
+    async def _get_page_content(self, page_path: str) -> str:
         """
         Retrieves the content for a specific wiki page.
 
@@ -119,7 +123,7 @@ class WikiClient:
         logger.info(f"Fetching content for page: {page_path}")
         params = {"path": page_path, "includeContent": True}
 
-        result = self._make_api_request(params)
+        result = await self._make_api_request(params)
         if result:
             logger.info(f"Successfully retrieved content for page: {page_path}")
             return result.get("content", "")
@@ -127,25 +131,23 @@ class WikiClient:
             logger.warning(f"Failed to retrieve content for page: {page_path}")
             return ""
 
-    def _get_wiki_tree(self) -> Optional[Dict[str, Any]]:
+    async def _get_wiki_tree(self) -> Optional[Dict[str, Any]]:
         """
         Retrieves the complete wiki page tree from the root.
 
         Returns:
             Optional[Dict[str, Any]]: Entire wiki page tree structure or None if retrieval fails
         """
-        logger.info("Retrieving complete wiki page tree")
         params = {"path": "/", "recursionLevel": "full", "includeContent": True}
 
-        result = self._make_api_request(params)
+        result = await self._make_api_request(params)
         if result:
-            logger.info("Successfully retrieved wiki tree structure")
             logger.info(f"Wiki tree size: {len(str(result))} bytes")
         else:
             logger.error("Failed to retrieve wiki tree")
         return result
 
-    def _flatten_pages(self, page: Dict[str, Any]) -> List[WikiPage]:
+    async def _flatten_pages(self, page: Dict[str, Any]) -> List[WikiPage]:
         """
         Recursively flattens the wiki page tree into a list of WikiPage objects.
 
@@ -160,13 +162,11 @@ class WikiClient:
         content = page.get("content")
         remote_url = page.get("remoteUrl")
 
-        logger.info(f"Processing page: {page_path}")
-
         if not content:
             logger.info(
                 f"Content not found in tree for {page_path}, fetching separately"
             )
-            content = self._get_page_content(page_path)
+            content = await self._get_page_content(page_path)
 
         if content:
             logger.info(f"Adding page to collection: {page_path}")
@@ -180,12 +180,12 @@ class WikiClient:
         subpages = page.get("subPages", [])
         logger.info(f"Processing {len(subpages)} subpages for {page_path}")
         for subpage in subpages:
-            pages.extend(self._flatten_pages(subpage))
+            pages.extend(await self._flatten_pages(subpage))
 
         return pages
 
 
-def fetch_wiki_pages(
+async def fetch_wiki_pages(
     organization: str, project: str, wiki_identifier: str
 ) -> Optional[List[WikiPage]]:
     """
@@ -206,16 +206,13 @@ def fetch_wiki_pages(
         logger.error("WIKI_ACCESS_TOKEN environment variable not set")
         return None
 
-    try:
-        logger.info("Initializing Wiki Client")
+    try:        
         client = WikiClient(organization, project, wiki_identifier, access_token)
-
-        logger.info("Retrieving wiki tree")
-        wiki_tree = client._get_wiki_tree()
+        
+        wiki_tree = await client._get_wiki_tree()
 
         if wiki_tree:
-            logger.info("Successfully retrieved wiki tree, processing pages")
-            pages = client._flatten_pages(wiki_tree)
+            pages = await client._flatten_pages(wiki_tree)
             logger.info(f"Successfully processed {len(pages)} wiki pages")
             return pages
         else:

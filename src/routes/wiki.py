@@ -60,7 +60,7 @@ async def process_website(
     """
     try:
         # Process wiki pages using the provided parameters
-        pages = fetch_wiki_pages(
+        pages = await fetch_wiki_pages(
             request.organization, request.project, request.wikiIdentifier
         )
 
@@ -112,7 +112,7 @@ async def process_website(
                     "project": request.project,
                 },
             )
-            indexer.vector_store.add_documents([doc])
+            await indexer.vector_store.aadd_documents([doc])
             total_docs += 1
             logger.info(f"Added document to vector store: {page.page_path}")
 
