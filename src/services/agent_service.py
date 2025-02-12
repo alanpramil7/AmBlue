@@ -44,7 +44,7 @@ class AgentService:
         self.llm = ChatOllama(model="llama3.2")
 
         # Define the chatbot node function for the graph.
-        def chatbot_node(state: State) -> State:
+        async def chatbot_node(state: State) -> State:
             """
             Node function that invokes the language model using the provided conversation messages.
             It takes the current state, calls the LLM with the messages, and returns the updated state.
@@ -52,7 +52,7 @@ class AgentService:
             logger.info("Invoking LLM in chatbot node with state messages.")
             # Call the LLM synchronously using the current conversation messages.
             # logger.info(f"Message sent to model: {state['messages'][-3:]}")
-            response = self.llm.invoke(state["messages"][-3:])
+            response = await self.llm.ainvoke(state["messages"][-3:])
             # Return the response wrapped in a dictionary under "messages".
             return {"messages": [response]}
 
@@ -65,7 +65,7 @@ class AgentService:
         # Compile the state graph with the memory checkpoint.
         self.graph = self.graph_builder.compile(checkpointer=self.memory)
 
-    def _retrieve_docs(self, query: str) -> List[Document]:
+    async def _retrieve_docs(self, query: str) -> List[Document]:
         """
         Retrieve documents relevant to the user query using the vector store retriever.
 
@@ -90,7 +90,7 @@ class AgentService:
         )
 
         # Retrieve documents for the given query.
-        docs = retriever.invoke(query)
+        docs = await retriever.ainvoke(query)
 
         # for i, doc in enumerate(docs):
         #     logger.info(
@@ -100,7 +100,7 @@ class AgentService:
         logger.info(f"Retrieved {len(docs)} documents for query: {query}")
         return docs
 
-    async def stream_response(self, user_input: str) -> AsyncGenerator[str, None]:
+    async def stream_response(self, user_input: str, user_id: str) -> AsyncGenerator[str, None]:
         """
         Asynchronously streams the LLM's response from the state graph based on the user's input.
         It first retrieves relevant documents, builds the conversation context, and then streams
@@ -113,7 +113,7 @@ class AgentService:
             str: Chunks of the response content as they are generated.
         """
         # Retrieve documents that are relevant to the user query.
-        docs = self._retrieve_docs(user_input)
+        docs = await self._retrieve_docs(user_input)
 
         # Start building the conversation messages.
         messages = []
@@ -143,7 +143,7 @@ class AgentService:
         state: State = {"messages": messages}
 
         # Define a configuration for the graph execution.
-        config: RunnableConfig = {"configurable": {"thread_id": "1"}}
+        config: RunnableConfig = {"configurable": {"thread_id": user_id}}
 
         logger.info("Starting to stream response from the state graph.")
 
@@ -158,5 +158,5 @@ class AgentService:
             elif msg.content == "</think>":
                 think_tag_open = False
             elif not think_tag_open:
-                print(msg.content)
+                # print(msg.content)
                 yield msg.content

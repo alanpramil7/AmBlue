@@ -9,7 +9,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from src.services.agent_service import AgentService
 from src.utils.logger import logger
@@ -21,14 +21,21 @@ class AgentProcessingRequest(BaseModel):
 
     Attributes:
         question (str): The question to be processed by the agent
+        user_id (str): The ID of the user making the request
     """
 
     question: str = Field(..., description="The question to be answered by the agent")
+    user_id: str = Field(..., description="The ID of the user making the request")
 
     class Config:
         """Pydantic model configuration"""
 
-        json_schema_extra = {"example": {"question": "What is the capital of France?"}}
+        json_schema_extra = {
+            "example": {
+                "question": "What is the capital of France?",
+                "user_id": "user123"
+            }
+        }
 
 
 # Create router with prefix and tags for API documentation
@@ -82,8 +89,15 @@ async def generate_response(request: AgentProcessingRequest) -> StreamingRespons
         HTTPException: If there's an error processing the request
     """
     try:
-        # Log the incoming request
-        logger.info(f"Processing question: {request.question}")
+        # Log the incoming request with more detail
+        logger.info(f"Received request - Question: {request.question}, User ID: {request.user_id}")
+
+        # Validate input data more thoroughly
+        if not isinstance(request.question, str) or not isinstance(request.user_id, str):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid data types: question and user_id must be strings",
+            )
 
         # Validate question
         if not request.question.strip():
@@ -95,7 +109,7 @@ async def generate_response(request: AgentProcessingRequest) -> StreamingRespons
 
         # Generate streaming response
         response = StreamingResponse(
-            agent_service.stream_response(request.question),
+            agent_service.stream_response(request.question, request.user_id),
             media_type="text/event-stream",
         )
 
@@ -104,6 +118,12 @@ async def generate_response(request: AgentProcessingRequest) -> StreamingRespons
 
         return response
 
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
     except Exception as e:
         error_msg = f"Error processing question: {str(e)}"
         logger.error(error_msg)
