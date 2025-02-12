@@ -1,36 +1,20 @@
-"""
-DevOps Wiki Client Module
-
-This module provides functionality to retrieve and process wiki pages
-from Azure DevOps repositories using the Azure DevOps REST API.
-
-Key Features:
-- Retrieve wiki page contents
-- Fetch entire wiki page tree
-- Support for recursive page retrieval
-- Robust error handling and logging
-"""
-
 import asyncio
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+import json
 
-import requests
+import aiohttp
+import cachetools
+from asyncio import Semaphore
+from aiohttp import ClientSession, TCPConnector
 
 from src.utils.logger import logger
 
 
 @dataclass
 class WikiPage:
-    """
-    Represents a single wiki page with its metadata and content.
-
-    Attributes:
-        page_path (str): Full path of the wiki page in the repository
-        content (str): Markdown or text content of the page
-        remote_url (Optional[str]): External URL of the wiki page, if available
-    """
+    """Represents a single wiki page with its metadata and content."""
 
     page_path: str
     content: str
@@ -43,10 +27,34 @@ class WikiClientError(Exception):
     pass
 
 
+def _make_cache_key(params: Dict[str, Any], method: str = "GET") -> str:
+    """Create a hashable cache key from request parameters."""
+    sorted_params = json.dumps(params, sort_keys=True)
+    return f"{method}:{sorted_params}"
+
+
+def _prepare_params(params: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Convert parameter values to strings suitable for URL query parameters.
+
+    Args:
+        params (Dict[str, Any]): Original parameters
+
+    Returns:
+        Dict[str, str]: Parameters with values converted to strings
+    """
+    prepared = {}
+    for key, value in params.items():
+        if isinstance(value, bool):
+            prepared[key] = str(value).lower()
+        elif value is not None:
+            prepared[key] = str(value)
+    return prepared
+
+
 class WikiClient:
     """
-    Client for interacting with Azure DevOps Wiki REST API.
-    Handles authentication, page retrieval, and wiki tree navigation.
+    Concurrent-capable client for interacting with Azure DevOps Wiki REST API.
     """
 
     def __init__(
@@ -55,171 +63,151 @@ class WikiClient:
         project: str,
         wiki_identifier: str,
         personal_access_token: str,
+        max_concurrent_requests: int = 10,
+        connection_timeout: int = 30,
     ):
-        """
-        Initialize the Wiki Client with Azure DevOps credentials.
-
-        Args:
-            organization (str): Azure DevOps organization name
-            project (str): Project name
-            wiki_identifier (str): Specific wiki repository identifier
-            personal_access_token (str): Authentication token
-        """
-        logger.info(
-            f"Initializing WikiClient for organization: {organization}, project: {project}"
-        )
+        """Initialize the Wiki Client with Azure DevOps credentials and connection settings."""
         self.base_url = f"https://dev.azure.com/{organization}/{project}/_apis/wiki/wikis/{wiki_identifier}/pages"
-        self.auth = ("", personal_access_token)
+        self.auth = aiohttp.BasicAuth("", personal_access_token)
         self.api_version = "7.1"
-        logger.info(f"Base URL configured: {self.base_url}")
+        self.semaphore = Semaphore(max_concurrent_requests)
+        self.session = None
+        self.connection_timeout = connection_timeout
+        self.processing_pages: Set[str] = set()
+        self.cache = cachetools.TTLCache(maxsize=100, ttl=3600)  # 1-hour cache
+
+    async def __aenter__(self):
+        """Initialize the aiohttp session when entering context."""
+        connector = TCPConnector(limit=50)  # Connection pool size
+        timeout = aiohttp.ClientTimeout(total=self.connection_timeout)
+        self.session = ClientSession(
+            connector=connector, timeout=timeout, auth=self.auth
+        )
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up the aiohttp session when exiting context."""
+        if self.session:
+            await self.session.close()
 
     async def _make_api_request(
         self, params: Dict[str, Any], method: str = "GET"
     ) -> Optional[Dict[str, Any]]:
-        """
-        Makes API requests with consistent error handling.
+        """Makes API requests with connection pooling and rate limiting."""
+        if not self.session:
+            raise WikiClientError("Client session not initialized")
 
-        Args:
-            params (Dict[str, Any]): Query parameters for the request
-            method (str, optional): HTTP method. Defaults to 'GET'
+        # Create cache key from original params
+        cache_key = _make_cache_key(params, method)
 
-        Returns:
-            Optional[Dict[str, Any]]: Parsed JSON response or None if request fails
-        """
-        logger.info(f"Making {method} request to {self.base_url}")
-        logger.info(f"Request parameters: {params}")
+        # Check cache first
+        if cache_key in self.cache:
+            return self.cache[cache_key]
 
-        try:
-            params["api-version"] = self.api_version
+        # Prepare parameters for the request
+        request_params = _prepare_params({**params, "api-version": self.api_version})
 
-            if method == "GET":
-                # Use asyncio.to_thread to run the blocking requests.get in a separate thread
-                response = await asyncio.to_thread(
-                    requests.get, self.base_url, params=params, auth=self.auth
-                )
-            else:
-                logger.error(f"Unsupported HTTP method: {method}")
-                raise ValueError(f"Unsupported HTTP method: {method}")
+        async with self.semaphore:  # Control concurrent requests
+            try:
+                async with self.session.request(
+                    method, self.base_url, params=request_params
+                ) as response:
+                    if response.status == 429:  # Rate limit hit
+                        retry_after = int(response.headers.get("Retry-After", 5))
+                        logger.warning(f"Rate limit hit, waiting {retry_after} seconds")
+                        await asyncio.sleep(retry_after)
+                        return await self._make_api_request(params, method)
 
-            response.raise_for_status()
-            logger.info(f"Request successful. Status code: {response.status_code}")
-            return response.json()
+                    response.raise_for_status()
+                    result = await response.json()
 
-        except requests.RequestException as e:
-            logger.error(f"API Request failed: {str(e)}")
-            logger.info(f"Request details - URL: {self.base_url}, Params: {params}")
-            return None
+                    # Cache the result
+                    self.cache[cache_key] = result
+                    return result
+
+            except aiohttp.ClientError as e:
+                logger.error(f"API Request failed: {str(e)}")
+                return None
 
     async def _get_page_content(self, page_path: str) -> str:
-        """
-        Retrieves the content for a specific wiki page.
+        """Retrieves the content for a specific wiki page with caching."""
+        # Prevent duplicate processing
+        if page_path in self.processing_pages:
+            while page_path in self.processing_pages:
+                await asyncio.sleep(0.1)
+            return self.cache.get(f"content_{page_path}", "")
 
-        Args:
-            page_path (str): Path of the wiki page
+        self.processing_pages.add(page_path)
+        try:
+            params = {"path": page_path, "includeContent": True}
+            result = await self._make_api_request(params)
 
-        Returns:
-            str: Page content or empty string if retrieval fails
-        """
-        logger.info(f"Fetching content for page: {page_path}")
-        params = {"path": page_path, "includeContent": True}
-
-        result = await self._make_api_request(params)
-        if result:
-            logger.info(f"Successfully retrieved content for page: {page_path}")
-            return result.get("content", "")
-        else:
-            logger.warning(f"Failed to retrieve content for page: {page_path}")
+            if result:
+                content = result.get("content", "")
+                self.cache[f"content_{page_path}"] = content
+                return content
             return ""
+        finally:
+            self.processing_pages.remove(page_path)
 
     async def _get_wiki_tree(self) -> Optional[Dict[str, Any]]:
-        """
-        Retrieves the complete wiki page tree from the root.
-
-        Returns:
-            Optional[Dict[str, Any]]: Entire wiki page tree structure or None if retrieval fails
-        """
+        """Retrieves the complete wiki page tree with caching."""
         params = {"path": "/", "recursionLevel": "full", "includeContent": True}
-
-        result = await self._make_api_request(params)
-        if result:
-            logger.info(f"Wiki tree size: {len(str(result))} bytes")
-        else:
-            logger.error("Failed to retrieve wiki tree")
-        return result
+        return await self._make_api_request(params)
 
     async def _flatten_pages(self, page: Dict[str, Any]) -> List[WikiPage]:
-        """
-        Recursively flattens the wiki page tree into a list of WikiPage objects.
-
-        Args:
-            page (Dict[str, Any]): Root page or subpage to process
-
-        Returns:
-            List[WikiPage]: Flattened list of wiki pages
-        """
+        """Recursively flattens the wiki page tree with concurrent processing."""
         pages = []
         page_path = page.get("path", "/")
         content = page.get("content")
         remote_url = page.get("remoteUrl")
 
         if not content:
-            logger.info(
-                f"Content not found in tree for {page_path}, fetching separately"
-            )
             content = await self._get_page_content(page_path)
 
         if content:
-            logger.info(f"Adding page to collection: {page_path}")
             pages.append(
                 WikiPage(page_path=page_path, content=content, remote_url=remote_url)
             )
-        else:
-            logger.warning(f"No content found for page: {page_path}")
 
-        # Process subpages recursively
+        # Process subpages concurrently
         subpages = page.get("subPages", [])
-        logger.info(f"Processing {len(subpages)} subpages for {page_path}")
-        for subpage in subpages:
-            pages.extend(await self._flatten_pages(subpage))
+        tasks = [self._flatten_pages(subpage) for subpage in subpages]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            pages.extend(result)
 
         return pages
 
 
 async def fetch_wiki_pages(
-    organization: str, project: str, wiki_identifier: str
+    organization: str,
+    project: str,
+    wiki_identifier: str,
+    max_concurrent_requests: int = 10,
 ) -> Optional[List[WikiPage]]:
-    """
-    Main entry point to fetch all wiki pages for a given Azure DevOps wiki.
-
-    Args:
-        organization (str): Azure DevOps organization name
-        project (str): Project name
-        wiki_identifier (str): Specific wiki repository identifier
-
-    Returns:
-        Optional[List[WikiPage]]: List of wiki pages or None if retrieval fails
-    """
-    logger.info(f"Starting wiki page fetch for {organization}/{project}")
-
+    """Fetch all wiki pages concurrently with proper resource management."""
     access_token = os.getenv("WIKI_ACCESS_TOKEN")
     if not access_token:
         logger.error("WIKI_ACCESS_TOKEN environment variable not set")
         return None
 
-    try:        
-        client = WikiClient(organization, project, wiki_identifier, access_token)
-        
-        wiki_tree = await client._get_wiki_tree()
+    try:
+        async with WikiClient(
+            organization,
+            project,
+            wiki_identifier,
+            access_token,
+            max_concurrent_requests,
+        ) as client:
+            wiki_tree = await client._get_wiki_tree()
+            if wiki_tree:
+                return await client._flatten_pages(wiki_tree)
 
-        if wiki_tree:
-            pages = await client._flatten_pages(wiki_tree)
-            logger.info(f"Successfully processed {len(pages)} wiki pages")
-            return pages
-        else:
-            logger.error("Failed to retrieve wiki tree")
-            return None
+        return None
 
     except Exception as e:
-        logger.error(f"Wiki page retrieval failed with error: {str(e)}")
+        logger.error(f"Wiki page retrieval failed: {str(e)}")
         logger.exception("Detailed error trace:")
         return None

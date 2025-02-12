@@ -1,9 +1,9 @@
-import asyncio
 from typing import List
 from urllib.parse import urljoin
-from xml.etree import ElementTree as ET
+import xml.etree.ElementTree as ET
+import asyncio
 
-import aiohttp
+import httpx
 from langchain_community.document_loaders import WebBaseLoader
 
 from src.services.indexer_service import IndexerService
@@ -11,98 +11,110 @@ from src.utils.logger import logger
 
 
 class WebsiteIndexer:
-    """A class to handle website indexing with sitemap support and concurrent processing."""
+    """
+    A class to handle website indexing with sitemap support.
+    """
 
     def __init__(self, indexer: IndexerService):
-        """Initialize the WebsiteIndexer."""
+        """
+        Initialize the WebsiteIndexer.
+
+        Args:
+            indexer (IndexerService): The indexer used for document processing.
+        """
         self.indexer = indexer
         self.logger = logger
-        self.semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
 
     async def _fetch_sitemap(self, base_url: str) -> List[str]:
         """
-        Fetch and parse sitemap URLs asynchronously.
+        Asynchronously fetch and parse sitemap URLs.
 
         Args:
-            base_url (str): Base URL to fetch sitemap from.
+            base_url (str): Base URL to fetch the sitemap from.
 
         Returns:
-            List[str]: List of URLs from the sitemap.
+            List[str]: A list of URLs found in the sitemap.
         """
         sitemap_url = urljoin(base_url, "sitemap.xml")
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(sitemap_url)
+                response.raise_for_status()
 
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(sitemap_url, timeout=10) as response:
-                    if response.status != 200:
-                        self.logger.info(f"No sitemap found at {sitemap_url}")
-                        return []
+            # Parse the XML content to extract URLs
+            root = ET.fromstring(response.content)
+            urls = [
+                loc.text
+                for loc in root.findall(
+                    ".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc"
+                )
+                if loc.text and not loc.text.endswith(".pdf")
+            ]
 
-                    content = await response.text()
-                    root = ET.fromstring(content)
-                    urls = [
-                        loc.text
-                        for loc in root.findall(
-                            ".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc"
-                        )
-                        if loc.text and not loc.text.endswith(".pdf")
-                    ]
+            self.logger.info(f"Found {len(urls)} URLs in sitemap")
+            return urls
 
-                    self.logger.info(f"Found {len(urls)} urls in sitemap")
-                    return urls
-
-            except Exception as e:
-                self.logger.info(f"Error fetching sitemap for {base_url}: {e}")
-                return []
+        except Exception as e:
+            self.logger.info(f"No sitemap found for {base_url}: {e}")
+            return []
 
     async def _process_url(self, url: str) -> None:
         """
-        Process a single URL for indexing with rate limiting.
+        Asynchronously process a single URL for indexing.
 
         Args:
-            url (str): URL to process and index.
+            url (str): The URL to process and index.
         """
-        async with self.semaphore:  # Limit concurrent processing
-            self.logger.info(f"Processing URL: {url}")
-            try:
-                # Run CPU-intensive operations in a thread pool
-                loader = WebBaseLoader(url)
-                docs = await asyncio.to_thread(loader.load)
+        self.logger.info(f"Loading website: {url}")
 
-                if not self.indexer.text_splitter:
-                    raise RuntimeError("Text Splitter not initialized.")
+        try:
+            loader = WebBaseLoader(url)
+            # Run the blocking loader.load() in a thread to avoid blocking the event loop
+            docs = await asyncio.to_thread(loader.load)
 
-                if not self.indexer.vector_store:
-                    raise RuntimeError("Vector Store not initialized.")
+            if not self.indexer.text_splitter:
+                raise RuntimeError("Text Splitter not initialized.")
 
-                # Split documents into chunks
-                chunks = await asyncio.to_thread(
-                    self.indexer.text_splitter.split_documents, docs
-                )
-                self.logger.info(f"Split into {len(chunks)} chunks")
+            if not self.indexer.vector_store:
+                raise RuntimeError("Vector Store not initialized.")
 
-                # Add documents to vector store
-                await asyncio.to_thread(self.indexer.vector_store.add_documents, chunks)
-                self.logger.info(f"Indexed URL: {url}")
+            self.logger.info("Splitting docs into chunks")
+            # Run the synchronous text splitting in a thread
+            chunks = self.indexer.text_splitter.split_documents(docs)
+            self.logger.info(f"Split into {len(chunks)} chunks")
 
-            except Exception as e:
-                self.logger.error(f"Error processing URL {url}: {e}")
+            # Run the blocking vector store addition in a thread
+            self.indexer.vector_store.add_documents(chunks)
+            self.logger.info(f"Indexing complete for URL: {url}")
+
+        except Exception as e:
+            self.logger.error(f"Error processing URL {url}: {e}")
 
     async def index_website(self, base_url: str) -> None:
         """
-        Index a website concurrently, using sitemap if available.
+        Asynchronously index a website, using its sitemap if available.
 
         Args:
-            base_url (str): Base URL of the website to index.
+            base_url (str): The base URL of the website to index.
         """
-        self.logger.info(f"Starting website indexing: {base_url}")
+        self.logger.info(f"Processing website: {base_url}")
 
-        # Fetch sitemap URLs or use base URL
-        urls = await self._fetch_sitemap(base_url) or [base_url]
+        # Try fetching sitemap URLs; fall back to the base URL if no sitemap is found
+        sitemap_urls = await self._fetch_sitemap(base_url)
+        urls_to_process = sitemap_urls if sitemap_urls else [base_url]
+        urls_to_process = urls_to_process[:20]
 
-        urls = urls[:20]
-        # Process URLs concurrently with rate limiting
-        tasks = [self._process_url(url) for url in urls]
-        await asyncio.gather(*tasks)
+        # Process each URL concurrently
+        await asyncio.gather(*(self._process_url(url) for url in urls_to_process))
 
-        self.logger.info(f"Completed indexing website: {base_url}")
+
+async def load_website(url: str, indexer: IndexerService) -> None:
+    """
+    Convenience function to asynchronously index a website using WebsiteIndexer.
+
+    Args:
+        url (str): The base URL of the website to index.
+        indexer (IndexerService): The indexer to use for document processing.
+    """
+    website_indexer = WebsiteIndexer(indexer)
+    await website_indexer.index_website(url)

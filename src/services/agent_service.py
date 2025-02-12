@@ -3,7 +3,6 @@ from typing import Annotated, AsyncGenerator, List, Sequence
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableConfig
 from langchain_groq import ChatGroq
-from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import MemorySaver
 
 # LangGraph and LLM imports for building the state graph.

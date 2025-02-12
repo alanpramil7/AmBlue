@@ -2,22 +2,27 @@
 Website Routes Module
 
 This module defines the API routes for website processing operations,
-including website indexing and management endpoints with concurrent processing support.
+including website indexing and management endpoints.
 """
 
 from typing import Dict
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl
 
+from src.services.website_service import load_website
 from src.services.indexer_service import IndexerService
-from src.services.website_service import WebsiteIndexer
 from src.utils.dependency import get_indexer
 from src.utils.logger import logger
 
 
 class WebsiteProcessRequest(BaseModel):
-    """Request model for website processing."""
+    """
+    Request model for website processing.
+
+    Attributes:
+        url (HttpUrl): The URL of the website to process.
+    """
 
     url: HttpUrl
 
@@ -25,6 +30,7 @@ class WebsiteProcessRequest(BaseModel):
         json_schema_extra = {"example": {"url": "https://example.com"}}
 
 
+# Create router with prefix and tags for API documentation
 router = APIRouter(
     prefix="/website",
     tags=["website"],
@@ -35,50 +41,33 @@ router = APIRouter(
 )
 
 
-async def process_website_background(url: str, indexer: IndexerService) -> None:
-    """
-    Background task for processing websites.
-
-    Args:
-        url (str): The website URL to process
-        indexer (IndexerService): The indexer service instance
-    """
-    try:
-        website_indexer = WebsiteIndexer(indexer)
-        await website_indexer.index_website(url)
-        logger.info(f"Successfully processed website: {url}")
-    except Exception as e:
-        logger.error(f"Error in background processing of website {url}: {e}")
-
-
 @router.post(
     "/",
     response_model=Dict,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Process Website",
-    description="Processes and indexes the content of the specified website asynchronously.",
+    description="Processes and indexes the content of the specified website.",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"description": "Invalid request parameters"},
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Invalid URL format"},
+    },
 )
 async def process_website(
-    request: WebsiteProcessRequest,
-    background_tasks: BackgroundTasks,
-    indexer: IndexerService = Depends(get_indexer),
+    request: WebsiteProcessRequest, indexer: IndexerService = Depends(get_indexer)
 ) -> Dict:
     """
-    Process and index a website asynchronously.
+    Process and index a website.
 
     Args:
-        request (WebsiteProcessRequest): The request containing the website URL
-        background_tasks (BackgroundTasks): FastAPI background tasks handler
-        indexer (IndexerService): The indexer service instance
+        request (WebsiteProcessRequest): The request containing the website URL.
+        indexer (IndexerService): The indexer service instance.
 
     Returns:
-        Dict: Response indicating the task has been queued
-
-    Raises:
-        HTTPException: If the URL is missing or invalid
+        Dict: A dictionary containing the status and message.
     """
     try:
-        logger.info(f"Queueing website processing request for URL: {request.url}")
+        # Log the incoming request
+        logger.info(f"Processing website request for URL: {request.url}")
 
         if not request.url:
             logger.error("Missing URL in request")
@@ -86,17 +75,21 @@ async def process_website(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required."
             )
 
-        # Add the processing task to background tasks
-        background_tasks.add_task(process_website_background, str(request.url), indexer)
+        # Await the asynchronous website loading/indexing function
+        await load_website(str(request.url), indexer)
+
+        # Log successful processing
+        logger.info(f"Successfully processed website: {request.url}")
 
         return {
-            "status": "accepted",
-            "message": f"Website {request.url} has been queued for processing",
+            "status": "success",
+            "message": f"Website {request.url} has been processed",
         }
 
     except Exception as e:
-        logger.error(f"Error queueing website {request.url}: {e}")
+        # Log the error and raise an HTTP exception
+        logger.error(f"Error processing website {request.url}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to queue website processing: {str(e)}",
+            detail=f"Failed to process website: {str(e)}",
         )
