@@ -13,6 +13,8 @@ from src.services.indexer_service import IndexerService
 from src.services.wiki_service import fetch_wiki_pages
 from src.utils.dependency import get_indexer
 from src.utils.logger import logger
+
+
 class WikiProcessingRequest(BaseModel):
     """
     Pydantic model for wiki processing request.

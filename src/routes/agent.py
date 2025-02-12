@@ -5,8 +5,6 @@ This module defines the API routes for agent operations,
 handling question answering through server-sent events (SSE).
 """
 
-import logging
-
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
@@ -33,7 +31,7 @@ class AgentProcessingRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "question": "What is the capital of France?",
-                "user_id": "user123"
+                "user_id": "user123",
             }
         }
 
@@ -90,10 +88,14 @@ async def generate_response(request: AgentProcessingRequest) -> StreamingRespons
     """
     try:
         # Log the incoming request with more detail
-        logger.info(f"Received request - Question: {request.question}, User ID: {request.user_id}")
+        logger.info(
+            f"Received request - Question: {request.question}, User ID: {request.user_id}"
+        )
 
         # Validate input data more thoroughly
-        if not isinstance(request.question, str) or not isinstance(request.user_id, str):
+        if not isinstance(request.question, str) or not isinstance(
+            request.user_id, str
+        ):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Invalid data types: question and user_id must be strings",

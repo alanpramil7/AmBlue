@@ -1,9 +1,7 @@
-import logging
 from typing import Annotated, AsyncGenerator, List, Sequence
 
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableConfig
-from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -14,6 +12,7 @@ from typing_extensions import TypedDict
 
 from src.utils.dependency import get_indexer
 from src.utils.logger import logger
+
 
 # Define the structure of the state that the graph will use.
 class State(TypedDict):
@@ -100,7 +99,9 @@ class AgentService:
         logger.info(f"Retrieved {len(docs)} documents for query: {query}")
         return docs
 
-    async def stream_response(self, user_input: str, user_id: str) -> AsyncGenerator[str, None]:
+    async def stream_response(
+        self, user_input: str, user_id: str
+    ) -> AsyncGenerator[str, None]:
         """
         Asynchronously streams the LLM's response from the state graph based on the user's input.
         It first retrieves relevant documents, builds the conversation context, and then streams

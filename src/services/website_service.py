@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from typing import List
 from urllib.parse import urljoin
 from xml.etree import ElementTree as ET

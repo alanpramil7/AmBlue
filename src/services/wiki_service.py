@@ -11,7 +11,6 @@ Key Features:
 - Robust error handling and logging
 """
 
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -19,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from src.utils.logger import logger
+
 
 @dataclass
 class WikiPage:

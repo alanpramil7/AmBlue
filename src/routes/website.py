@@ -8,7 +8,6 @@ including website indexing and management endpoints with concurrent processing s
 from typing import Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, HttpUrl
 
 from src.services.indexer_service import IndexerService
