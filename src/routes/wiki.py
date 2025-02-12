@@ -2,11 +2,12 @@
 Wiki Routes Module with concurrent request handling
 """
 
-from fastapi import APIRouter, Depends, status, BackgroundTasks
-from langchain_core.documents import Document
-from pydantic import BaseModel, Field
 import asyncio
 from typing import Dict
+
+from fastapi import APIRouter, BackgroundTasks, Depends, status
+from langchain_core.documents import Document
+from pydantic import BaseModel, Field
 
 from src.services.indexer_service import IndexerService
 from src.services.wiki_service import fetch_wiki_pages

@@ -1,12 +1,12 @@
 import asyncio
+import json
 import os
+from asyncio import Semaphore
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
-import json
 
 import aiohttp
 import cachetools
-from asyncio import Semaphore
 from aiohttp import ClientSession, TCPConnector
 
 from src.utils.logger import logger
