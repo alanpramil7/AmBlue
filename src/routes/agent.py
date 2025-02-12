@@ -5,11 +5,12 @@ This module defines the API routes for agent operations,
 handling question answering through server-sent events (SSE).
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from src.services.agent_service import AgentService
+from src.utils.agent_dependency import get_agent
 from src.utils.logger import logger
 
 
@@ -46,9 +47,6 @@ router = APIRouter(
     },
 )
 
-# Initialize agent service
-agent_service = AgentService()
-
 
 async def format_sse(data: str) -> str:
     """
@@ -73,7 +71,9 @@ async def format_sse(data: str) -> str:
         status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Invalid request format"},
     },
 )
-async def generate_response(request: AgentProcessingRequest) -> StreamingResponse:
+async def generate_response(
+    request: AgentProcessingRequest, agent_service: AgentService = Depends(get_agent)
+) -> StreamingResponse:
     """
     Generate streaming response for the given question.
 
