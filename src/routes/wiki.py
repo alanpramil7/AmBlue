@@ -3,14 +3,12 @@ Wiki Routes Module with concurrent request handling
 """
 
 import asyncio
-from typing import Dict
-
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 
 from src.services.indexer_service import IndexerService
-from src.services.wiki_service import fetch_wiki_pages
+from src.services.wiki_service import WikiService, TaskStore
 from src.utils.dependency import get_indexer
 from src.utils.logger import logger
 
@@ -26,8 +24,21 @@ class WikiProcessingRequest(BaseModel):
     )
 
 
-# Track ongoing processing tasks
-processing_tasks: Dict[str, asyncio.Task] = {}
+class ProcessingStatusResponse(BaseModel):
+    """Pydantic model for processing status response."""
+
+    status: str
+    total_pages: int
+    processed_pages: list[str]
+    remaining_pages: list[str]
+    failed_pages: list[str]
+    current_page: str | None
+    percent_complete: float
+    error: str | None
+
+
+# Initialize task store
+task_store = TaskStore()
 
 
 router = APIRouter(
@@ -40,128 +51,69 @@ router = APIRouter(
 )
 
 
-async def process_wiki_pages(
-    request: WikiProcessingRequest, indexer: IndexerService, task_id: str
+def get_processor(indexer: IndexerService = Depends(get_indexer)) -> WikiService:
+    return WikiService(indexer, task_store)
+
+
+@router.post("/", response_model=dict)
+async def start_wiki_processing(
+    request: WikiProcessingRequest,
+    processor: WikiService = Depends(get_processor),
 ) -> dict:
     """
-    Background task to process and index wiki pages.
+    Start wiki processing and return task ID for status tracking.
     """
     try:
-        pages = await fetch_wiki_pages(
+        # Check if wiki is already being processed
+        task_id = f"{request.organization}_{request.project}_{request.wikiIdentifier}"
+        existing_task = await processor.task_store.get_task(task_id)
+        if existing_task:
+            return {
+                "status": "already_processing",
+                "task_id": task_id,
+                "message": "Wiki is already being processed",
+            }
+
+        task_id = await processor.process_wiki(
             request.organization,
             request.project,
             request.wikiIdentifier,
             request.max_concurrent_requests,
         )
-
-        if not pages:
-            logger.info("No Pages found.")
-            return {"status": "completed", "total_documents_processed": 0}
-
-        if not indexer.vector_store:
-            logger.error("Vector store not initialized")
-            return {"status": "failed", "error": "Vector store not initialized"}
-
-        # Process pages in chunks to avoid memory issues
-        chunk_size = 10
-        total_docs = 0
-
-        for i in range(0, len(pages), chunk_size):
-            chunk = pages[i : i + chunk_size]
-            docs = []
-
-            for page in chunk:
-                if not page.content.strip():
-                    continue
-
-                lines = [line.strip() for line in page.content.split("\n")]
-                non_empty_lines = [line for line in lines if line]
-
-                if not non_empty_lines:
-                    continue
-
-                if len(non_empty_lines) == 1:
-                    line = non_empty_lines[0]
-                    if line.startswith("#") or line.startswith("!["):
-                        continue
-
-                doc = Document(
-                    page_content=page.content,
-                    metadata={
-                        "source": f"wiki_{page.page_path}",
-                        "organization": request.organization,
-                        "project": request.project,
-                    },
-                )
-                docs.append(doc)
-
-            if docs:
-                await indexer.vector_store.aadd_documents(docs)
-                total_docs += len(docs)
-                logger.info(f"Processed chunk of {len(docs)} documents")
-
-        logger.info(
-            f"Wiki processing completed. Total documents processed: {total_docs}"
-        )
-        return {"status": "completed", "total_documents_processed": total_docs}
-
-    except Exception as e:
-        logger.error(f"Error processing wiki: {str(e)}")
-        return {"status": "failed", "error": str(e)}
-    # finally:
-    #     # Clean up task tracking
-    #     if task_id in processing_tasks:
-    #         del processing_tasks[task_id]
-
-
-@router.post("/")
-async def process_website(
-    request: WikiProcessingRequest,
-    background_tasks: BackgroundTasks,
-    indexer: IndexerService = Depends(get_indexer),
-) -> dict:
-    """
-    Start asynchronous processing of wiki pages.
-    """
-    # Generate unique task ID
-    task_id = f"{request.organization}_{request.project}_{request.wikiIdentifier}"
-
-    # Check if already processing
-    if task_id in processing_tasks:
         return {
-            "status": "in_progress",
-            "message": "Processing already in progress for this wiki",
+            "status": "started",
             "task_id": task_id,
+            "message": "Wiki processing started",
         }
-
-    # Create and store the processing task
-    task = asyncio.create_task(process_wiki_pages(request, indexer, task_id))
-    processing_tasks[task_id] = task
-
-    return {
-        "status": "started",
-        "message": "Wiki processing started",
-        "task_id": task_id,
-    }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
-@router.get("/status/{task_id}")
-async def get_processing_status(task_id: str) -> dict:
+
+
+
+@router.get("/status/{task_id}", response_model=ProcessingStatusResponse)
+async def get_processing_status(
+    task_id: str,
+) -> ProcessingStatusResponse:
     """
-    Get the status of a processing task.
+    Get detailed processing status for frontend tracking.
     """
-    task = processing_tasks.get(task_id)
+    task = await task_store.get_task(task_id)
     if not task:
-        return {
-            "status": "completed",
-            "message": "No active processing task found with this ID",
-        }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
 
-    if task.done():
-        try:
-            result = await task
-            return result
-        except Exception as e:
-            return {"status": "failed", "error": str(e)}
-
-    return {"status": "in_progress", "message": "Processing in progress"}
+    return ProcessingStatusResponse(
+        status=task.status.status.value,
+        total_pages=task.status.total_pages,
+        processed_pages=task.status.processed_pages,
+        remaining_pages=task.status.remaining_pages,
+        failed_pages=task.status.failed_pages,
+        current_page=task.status.current_page,
+        percent_complete=task.status.percent_complete,
+        error=task.status.error,
+    )

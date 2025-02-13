@@ -3,13 +3,91 @@ import json
 import os
 from asyncio import Semaphore
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
 import aiohttp
 import cachetools
 from aiohttp import ClientSession, TCPConnector
+from langchain_core.documents import Document
 
+from src.services.indexer_service import IndexerService
 from src.utils.logger import logger
+
+
+class TaskStatus(Enum):
+    """Enum for task processing status."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass
+class TaskInfo:
+    """Information about a task's status and progress."""
+    status: TaskStatus
+    total_pages: int
+    processed_pages: list[str]
+    remaining_pages: list[str]
+    failed_pages: list[str]
+    current_page: str | None
+    percent_complete: float
+    error: str | None
+
+
+@dataclass
+class Task:
+    """Represents a processing task."""
+    id: str
+    status: TaskInfo
+
+
+class TaskStore:
+    """Store for tracking task status and progress."""
+    def __init__(self):
+        self.tasks: Dict[str, Task] = {}
+        self._lock = asyncio.Lock()
+
+    async def create_task(self, task_id: str, total_pages: int) -> Task:
+        """Create a new task with initial status."""
+        async with self._lock:
+            task = Task(
+                id=task_id,
+                status=TaskInfo(
+                    status=TaskStatus.PENDING,
+                    total_pages=total_pages,
+                    processed_pages=[],
+                    remaining_pages=[],
+                    failed_pages=[],
+                    current_page=None,
+                    percent_complete=0.0,
+                    error=None,
+                ),
+            )
+            self.tasks[task_id] = task
+            return task
+
+    async def get_task(self, task_id: str) -> Optional[Task]:
+        """Get a task by its ID."""
+        async with self._lock:
+            return self.tasks.get(task_id)
+
+    async def update_task(self, task_id: str, status: TaskInfo) -> None:
+        """Update a task's status."""
+        async with self._lock:
+            if task_id in self.tasks:
+                self.tasks[task_id].status = status
+
+    async def get_task_by_wiki(self, organization: str, project: str, wiki_identifier: str) -> Optional[str]:
+        """Get task ID by wiki details if it is already being processed."""
+        task_id = f"{organization}_{project}_{wiki_identifier}"
+        async with self._lock:
+            if task_id in self.tasks:
+                task = self.tasks[task_id]
+                if task.status.status in [TaskStatus.PENDING, TaskStatus.IN_PROGRESS]:
+                    return task_id
+            return None
 
 
 @dataclass
@@ -179,6 +257,190 @@ class WikiClient:
             pages.extend(result)
 
         return pages
+
+
+class WikiService:
+    """Service for processing wiki pages with task tracking."""
+
+    def __init__(self, indexer: IndexerService, task_store: TaskStore):
+        self.indexer = indexer
+        self.task_store = task_store
+
+    async def _process_wiki_pages(
+        self,
+        task_id: str,
+        organization: str,
+        project: str,
+        wiki_identifier: str,
+        max_concurrent_requests: int = 10,
+    ) -> None:
+        """Internal method to process wiki pages and update task status."""
+        try:
+            pages = await fetch_wiki_pages(
+                organization,
+                project,
+                wiki_identifier,
+                max_concurrent_requests,
+            )
+
+            if not pages:
+                logger.info("No Pages found.")
+                await self.task_store.update_task(
+                    task_id,
+                    TaskInfo(
+                        status=TaskStatus.COMPLETED,
+                        total_pages=0,
+                        processed_pages=[],
+                        remaining_pages=[],
+                        failed_pages=[],
+                        current_page=None,
+                        percent_complete=100.0,
+                        error=None,
+                    ),
+                )
+                return
+
+            if not self.indexer.vector_store:
+                logger.error("Vector store not initialized")
+                raise Exception("Vector store not initialized")
+
+            # Initialize status
+            total_pages = len(pages)
+            remaining_pages = [page.page_path for page in pages]
+
+            # Update initial status
+            await self.task_store.update_task(
+                task_id,
+                TaskInfo(
+                    status=TaskStatus.IN_PROGRESS,
+                    total_pages=total_pages,
+                    processed_pages=[],
+                    remaining_pages=remaining_pages,
+                    failed_pages=[],
+                    current_page=remaining_pages[0] if remaining_pages else None,
+                    percent_complete=0.0,
+                    error=None,
+                ),
+            )
+
+            # Process pages in chunks
+            chunk_size = 10
+            processed_pages = []
+            failed_pages = []
+
+            for i in range(0, len(pages), chunk_size):
+                chunk = pages[i : i + chunk_size]
+                docs = []
+
+                for page in chunk:
+                    try:
+                        if not page.content.strip():
+                            continue
+
+                        lines = [line.strip() for line in page.content.split("\n")]
+                        non_empty_lines = [line for line in lines if line]
+
+                        if not non_empty_lines:
+                            continue
+
+                        if len(non_empty_lines) == 1:
+                            line = non_empty_lines[0]
+                            if line.startswith("#") or line.startswith("!["): 
+                                continue
+
+                        doc = Document(
+                            page_content=page.content,
+                            metadata={
+                                "source": f"wiki_{page.page_path}",
+                                "organization": organization,
+                                "project": project,
+                            },
+                        )
+                        docs.append(doc)
+                        processed_pages.append(page.page_path)
+                    except Exception as e:
+                        logger.error(f"Error processing page {page.page_path}: {str(e)}")
+                        failed_pages.append(page.page_path)
+
+                if docs:
+                    await self.indexer.vector_store.aadd_documents(docs)
+                    logger.info(f"Processed chunk of {len(docs)} documents")
+
+                # Update task status
+                remaining_pages = [p for p in remaining_pages if p not in processed_pages and p not in failed_pages]
+                percent_complete = (len(processed_pages) + len(failed_pages)) / total_pages * 100
+
+                await self.task_store.update_task(
+                    task_id,
+                    TaskInfo(
+                        status=TaskStatus.IN_PROGRESS,
+                        total_pages=total_pages,
+                        processed_pages=processed_pages,
+                        remaining_pages=remaining_pages,
+                        failed_pages=failed_pages,
+                        current_page=remaining_pages[0] if remaining_pages else None,
+                        percent_complete=percent_complete,
+                        error=None,
+                    ),
+                )
+
+            # Update final status
+            final_status = TaskStatus.COMPLETED if not failed_pages else TaskStatus.FAILED
+            await self.task_store.update_task(
+                task_id,
+                TaskInfo(
+                    status=final_status,
+                    total_pages=total_pages,
+                    processed_pages=processed_pages,
+                    remaining_pages=[],
+                    failed_pages=failed_pages,
+                    current_page=None,
+                    percent_complete=100.0,
+                    error=f"Failed to process {len(failed_pages)} pages" if failed_pages else None,
+                ),
+            )
+
+        except Exception as e:
+            logger.error(f"Error processing wiki: {str(e)}")
+            await self.task_store.update_task(
+                task_id,
+                TaskInfo(
+                    status=TaskStatus.FAILED,
+                    total_pages=0,
+                    processed_pages=[],
+                    remaining_pages=[],
+                    failed_pages=[],
+                    current_page=None,
+                    percent_complete=0.0,
+                    error=str(e),
+                ),
+            )
+
+    async def process_wiki(
+        self,
+        organization: str,
+        project: str,
+        wiki_identifier: str,
+        max_concurrent_requests: int = 10,
+    ) -> str:
+        """Start wiki processing in the background and return task ID."""
+        task_id = f"{organization}_{project}_{wiki_identifier}"
+
+        # Create task with initial status
+        await self.task_store.create_task(task_id, 0)
+
+        # Start processing in background
+        asyncio.create_task(
+            self._process_wiki_pages(
+                task_id,
+                organization,
+                project,
+                wiki_identifier,
+                max_concurrent_requests,
+            )
+        )
+
+        return task_id
 
 
 async def fetch_wiki_pages(
