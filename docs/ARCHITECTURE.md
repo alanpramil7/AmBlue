@@ -1,8 +1,9 @@
 # AmBlue Architecture
 
 ## System Architecture
-
 The AmBlue application follows a modular architecture with clear separation of concerns:
+
+![AmBlue Architecture](./RAG-Architecture.png)
 
 ```plaintext
 AmBlue
