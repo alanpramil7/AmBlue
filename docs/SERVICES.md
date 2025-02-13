@@ -62,44 +62,177 @@ The IndexerService manages document processing, embedding generation, and vector
 
 ## WebsiteService
 
-Handles website content processing and indexing operations.
+Handles website content processing and indexing operations with asynchronous task tracking.
 
 ### Features
 
+- Asynchronous website processing with task tracking
 - Comprehensive sitemap crawling
 - URL validation and normalization
 - Content extraction and processing
-- Error handling and retry logic
+- Concurrent request handling with rate limiting
+- Real-time progress monitoring
+
+### Components
+
+1. **TaskStore**
+   - Purpose: Manages processing task states and progress
+   - Features:
+     - Task status tracking (PENDING, IN_PROGRESS, COMPLETED, FAILED)
+     - Progress monitoring with percentage completion
+     - Failed URL tracking
+     - Concurrent access handling with locks
+
+2. **ProcessingStatus**
+   - Tracks:
+     - Total URLs to process
+     - Processed URLs list
+     - Remaining URLs queue
+     - Failed URLs list
+     - Current URL being processed
+     - Completion percentage
+     - Error information
 
 ### Key Methods
 
-- `index_website(url: str)`
+- `process_website(url: str)`
 
-  - Purpose: Main entry point for website indexing
-  - Parameters: Website URL
-  - Returns: Processing status and statistics
+  - Purpose: Main entry point for website processing
+  - Returns: Task ID for status tracking
+  - Features:
+    - Asynchronous processing
+    - Progress monitoring
+    - Error handling
 
-- `_fetch_sitemap(url: str)`
+- `_process_website_task(url: str, task_id: str)`
+
+  - Purpose: Background task for website processing
+  - Features:
+    - Sitemap parsing
+    - Concurrent URL processing
+    - Status updates
+    - Error handling
+
+- `_fetch_sitemap(base_url: str)`
 
   - Purpose: Retrieves and parses website sitemap
   - Returns: List of URLs to process
-  - Error handling: Handles missing/invalid sitemaps
+  - Features:
+    - XML sitemap parsing
+    - URL validation
+    - Error handling for missing/invalid sitemaps
 
-- `_process_url(url: str)`
+- `_process_url(url: str, task_id: str)`
   - Purpose: Processes individual webpage content
   - Features:
-    - Content extraction
-    - HTML cleaning
-    - Metadata collection
+    - Content extraction with WebBaseLoader
+    - Rate limiting with semaphore
+    - Status updates
+    - Error handling and logging
 
 ### Error Handling
 
-- Comprehensive error logging
-- Network timeout handling
-- Invalid URL detection
-- Rate limiting consideration
+- Comprehensive error logging with context
+- Network timeout handling (configurable)
+- Invalid URL detection and reporting
+- Rate limiting with configurable concurrent requests
+- Task-level error tracking
+- Automatic retry logic for transient failures
+
+### Configuration
+
+- `max_concurrent_requests`: Controls concurrent URL processing (default: 10)
+- `connection_timeout`: Network timeout in seconds (default: 30)
+- Configurable through service initialization
 
 ## WikiService
+
+Manages Azure DevOps Wiki content processing with asynchronous task tracking and caching.
+
+### Features
+
+- Asynchronous wiki processing with task tracking
+- Concurrent page processing with rate limiting
+- Content caching for improved performance
+- Real-time progress monitoring
+- Hierarchical page structure handling
+
+### Components
+
+1. **WikiClient**
+   - Purpose: Handles Azure DevOps Wiki API interactions
+   - Features:
+     - Connection pooling with aiohttp
+     - Rate limiting with semaphore
+     - TTL-based caching (1-hour cache)
+     - Authentication handling
+     - Concurrent request management
+
+2. **TaskStore**
+   - Purpose: Manages processing task states
+   - Features:
+     - Task status tracking (PENDING, IN_PROGRESS, COMPLETED, FAILED)
+     - Progress monitoring
+     - Failed pages tracking
+     - Concurrent access handling
+
+3. **WikiPage**
+   - Purpose: Represents wiki page content and metadata
+   - Properties:
+     - Page path
+     - Content
+     - Remote URL
+
+### Key Methods
+
+- `process_wiki(organization: str, project: str, wiki_identifier: str)`
+
+  - Purpose: Main entry point for wiki processing
+  - Returns: Task ID for status tracking
+  - Features:
+    - Asynchronous processing
+    - Progress monitoring
+    - Error handling
+
+- `_process_wiki_pages(task_id: str, organization: str, project: str, wiki_identifier: str)`
+
+  - Purpose: Background task for wiki processing
+  - Features:
+    - Page tree traversal
+    - Concurrent page processing
+    - Status updates
+    - Error handling
+
+- `fetch_wiki_pages(organization: str, project: str, wiki_identifier: str)`
+  - Purpose: Retrieves all wiki pages concurrently
+  - Features:
+    - Resource management
+    - Concurrent processing
+    - Error handling
+
+### Error Handling
+
+- Custom WikiClientError for API-related errors
+- Network timeout handling
+- Rate limit handling
+- Task-level error tracking
+- Automatic retry logic
+- Comprehensive error logging
+
+### Caching
+
+- TTL-based caching (1-hour expiry)
+- Cache size limit: 100 items
+- Cached items:
+  - Page content
+  - Wiki tree structure
+
+### Configuration
+
+- `max_concurrent_requests`: Controls concurrent page processing (default: 10)
+- `connection_timeout`: Network timeout in seconds (default: 30)
+- API version: 7.1
+- Cache TTL: 3600 seconds (1 hour)
 
 Handles Azure DevOps wiki content retrieval and processing.
 
@@ -176,6 +309,89 @@ Handles Azure DevOps wiki content retrieval and processing.
 
 ## DocumentService
 
+Handles asynchronous document processing and indexing operations with support for multiple file formats.
+
+### Features
+
+1. **Concurrent Processing**
+   - Semaphore-based concurrency control (max 5 concurrent)
+   - Async file operations
+   - Thread pool for CPU-intensive tasks
+   - Resource management
+
+2. **Document Processing Pipeline**
+   - File validation and type detection
+   - Temporary file management
+   - Document loading and parsing
+   - Content chunking
+   - Vector embedding and storage
+
+3. **Supported Formats**
+   - PDF (.pdf) using PyPDFLoader
+   - Microsoft Word (.docx) using Docx2txtLoader
+   - Extensible loader architecture
+
+### Key Methods
+
+- `process_document(content: bytes, file_name: str, content_type: str)`
+
+  - Purpose: Main entry point for document processing
+  - Features:
+    - File validation
+    - Temporary storage management
+    - Concurrent processing
+    - Progress tracking
+    - Resource cleanup
+
+- `_create_document(file_path: str)`
+
+  - Purpose: Document loading and parsing
+  - Features:
+    - Format detection
+    - Loader selection
+    - Thread pool execution
+    - Error handling
+
+### Error Handling
+
+1. **Input Validation**
+   - File format verification
+   - Content type checking
+   - File name validation
+   - Size limit enforcement
+
+2. **Processing Errors**
+   - Loader failures
+   - Resource exhaustion
+   - Indexing errors
+   - Cleanup failures
+
+3. **Recovery Mechanisms**
+   - Temporary file cleanup
+   - Resource release
+   - Error logging
+   - Client notification
+
+### Performance Features
+
+1. **Concurrency**
+   - Async I/O operations
+   - Semaphore-based limits
+   - Thread pool utilization
+   - Resource pooling
+
+2. **Resource Management**
+   - Temporary file cleanup
+   - Memory optimization
+   - Connection pooling
+   - Thread management
+
+3. **Monitoring**
+   - Progress tracking
+   - Error logging
+   - Performance metrics
+   - Resource usage
+
 Handles document file processing and indexing operations.
 
 ### Features
@@ -241,6 +457,77 @@ Handles document file processing and indexing operations.
 - Clean temporary file management
 
 ## AgentService
+
+Provides RAG-based question answering capabilities using LangGraph and LLM integration.
+
+### Components
+
+1. **LLM Integration**
+   - Implementation: Groq LLM (deepseek-r1-distill-llama-70b)
+   - Purpose: Natural language response generation
+   - Features:
+     - Streaming response capability
+     - Context-aware responses
+     - Think-tag processing
+
+2. **LangGraph Integration**
+   - Purpose: Manages conversation state and flow
+   - Features:
+     - State management with checkpointing
+     - Message history tracking
+     - Async streaming support
+
+3. **Document Retrieval**
+   - Purpose: Fetches relevant context for queries
+   - Features:
+     - Similarity-based search
+     - Configurable retrieval count (k=3)
+     - Document content aggregation
+
+### Key Methods
+
+- `stream_response(user_input: str, user_id: str)`
+
+  - Purpose: Main entry point for question answering
+  - Features:
+    - Asynchronous response streaming
+    - Context retrieval and integration
+    - System prompt management
+    - Think-tag filtering
+
+- `_retrieve_docs(query: str)`
+
+  - Purpose: Retrieves relevant documents for context
+  - Features:
+    - Vector similarity search
+    - Configurable result count
+    - Error handling for uninitialized stores
+
+### State Management
+
+1. **Conversation State**
+   - Message history tracking
+   - System prompt integration
+   - Context management
+
+2. **Graph State**
+   - Checkpoint management with MemorySaver
+   - Thread-based configuration
+   - Message streaming control
+
+### Error Handling
+
+- Vector store initialization checks
+- LLM response error handling
+- Context integration validation
+- Streaming error management
+
+### Performance Features
+
+- Async/await for non-blocking operations
+- Efficient context retrieval (top-k)
+- Streaming response for better UX
+- Thread-based state isolation
 
 Manages the integration between document retrieval and LLM-powered response generation using LangGraph.
 
