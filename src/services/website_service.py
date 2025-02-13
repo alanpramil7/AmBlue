@@ -1,58 +1,103 @@
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Optional, Set
+from urllib.parse import urljoin
 import asyncio
 import xml.etree.ElementTree as ET
-from asyncio import Semaphore
-from dataclasses import dataclass
-from typing import List, Optional, Set
-from urllib.parse import urljoin
+from uuid import uuid4
 
-import cachetools
 import httpx
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_core.documents import Document
+from pydantic import HttpUrl
 
 from src.services.indexer_service import IndexerService
 from src.utils.logger import logger
 
 
+class TaskStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 @dataclass
-class WebPage:
-    """Represents a single web page with its content."""
+class ProcessingStatus:
+    total_urls: int = 0
+    processed_urls: List[str] = None
+    remaining_urls: List[str] = None
+    failed_urls: List[str] = None
+    current_url: Optional[str] = None
+    percent_complete: float = 0
+    status: TaskStatus = TaskStatus.PENDING
+    error: Optional[str] = None
+    
+    def __post_init__(self):
+        self.processed_urls = self.processed_urls or []
+        self.remaining_urls = self.remaining_urls or []
+        self.failed_urls = self.failed_urls or []
 
+
+@dataclass
+class TaskInfo:
+    id: str
     url: str
-    content: Optional[str] = None
+    status: ProcessingStatus
+    created_at: datetime
+    updated_at: datetime
 
 
-class WebsiteClientError(Exception):
-    """Custom exception for Website Client related errors."""
+class TaskStore:
+    """In-memory task storage"""
+    def __init__(self):
+        self.tasks: Dict[str, TaskInfo] = {}
+        self._lock = asyncio.Lock()
+    
+    async def create_task(self, url: str) -> str:
+        async with self._lock:
+            # Check if URL is already being processed
+            for task in self.tasks.values():
+                if task.url == url and task.status.status in [TaskStatus.PENDING, TaskStatus.IN_PROGRESS]:
+                    return task.id
+            
+            task_id = str(uuid4())
+            self.tasks[task_id] = TaskInfo(
+                id=task_id,
+                url=url,
+                status=ProcessingStatus(),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            return task_id
+    
+    async def update_task(self, task_id: str, status: ProcessingStatus) -> None:
+        async with self._lock:
+            if task_id in self.tasks:
+                self.tasks[task_id].status = status
+                self.tasks[task_id].updated_at = datetime.utcnow()
+    
+    async def get_task(self, task_id: str) -> Optional[TaskInfo]:
+        async with self._lock:
+            return self.tasks.get(task_id)
 
-    pass
 
-
-class WebsiteClient:
-    """
-    Concurrent-capable client for processing websites.
-    """
-
+class WebsiteProcessor:
     def __init__(
         self,
-        base_url: str,
         indexer: IndexerService,
+        task_store: TaskStore,
         max_concurrent_requests: int = 10,
         connection_timeout: int = 30,
     ):
-        """Initialize the Website Client with processing settings."""
-        self.base_url = base_url
         self.indexer = indexer
-        self.semaphore = Semaphore(max_concurrent_requests)
+        self.task_store = task_store
+        self.semaphore = asyncio.Semaphore(max_concurrent_requests)
         self.connection_timeout = connection_timeout
-        self.processing_urls: Set[str] = set()
-        self.cache = cachetools.TTLCache(maxsize=100, ttl=3600)  # 1-hour cache
-        self.processed_urls = []
-        self.processed_pages = 0
 
-    async def _fetch_sitemap(self) -> List[str]:
+    async def _fetch_sitemap(self, base_url: str) -> List[str]:
         """Fetch and parse sitemap URLs."""
-        sitemap_url = urljoin(self.base_url, "sitemap.xml")
+        sitemap_url = urljoin(base_url, "sitemap.xml")
         try:
             async with httpx.AsyncClient(timeout=self.connection_timeout) as client:
                 response = await client.get(sitemap_url)
@@ -66,83 +111,83 @@ class WebsiteClient:
                 )
                 if loc.text and not loc.text.endswith(".pdf")
             ]
-
-            logger.info(f"Found {len(urls)} URLs in sitemap")
             return urls
 
         except Exception as e:
-            logger.info(f"No sitemap found for {self.base_url}: {e}")
-            return [self.base_url]
+            logger.info(f"No sitemap found for {base_url}: {e}")
+            return [base_url]
 
-    async def _process_url(self, url: str) -> Optional[Document]:
-        """Process a single URL with rate limiting and caching."""
-        if url in self.processing_urls:
-            return None
-
-        self.processing_urls.add(url)
+    async def _process_url(self, url: str, task_id: str) -> bool:
+        """Process a single URL with status updates."""
         try:
             async with self.semaphore:
-                if url in self.cache:
-                    return self.cache[url]
-
                 logger.info(f"Processing URL: {url}")
+                
+                # Update current URL in status
+                task = await self.task_store.get_task(task_id)
+                if task:
+                    status = task.status
+                    status.current_url = url
+                    await self.task_store.update_task(task_id, status)
 
-                try:
-                    loader = WebBaseLoader(url)
-                    docs = await asyncio.to_thread(loader.load)
+                loader = WebBaseLoader(url)
+                docs = await asyncio.to_thread(loader.load)
 
-                    if not docs:
-                        return None
+                if not docs:
+                    return False
 
-                    chunks = self.indexer.text_splitter.split_documents(docs)
+                chunks = self.indexer.text_splitter.split_documents(docs)
+                for chunk in chunks:
+                    chunk.metadata["source"] = url
 
-                    for chunk in chunks:
-                        chunk.metadata["source"] = url
+                await self.indexer.vector_store.aadd_documents(chunks)
+                return True
 
-                    await self.indexer.vector_store.aadd_documents(chunks)
-                    self.processed_pages += len(chunks)
-                    self.processed_urls.append(url)
+        except Exception as e:
+            logger.error(f"Error processing URL {url}: {e}")
+            return False
 
-                    return docs[0]
+    async def process_website(self, url: str) -> str:
+        """Process website and return task ID for status tracking."""
+        task_id = await self.task_store.create_task(url)
+        asyncio.create_task(self._process_website_task(url, task_id))
+        return task_id
 
-                except Exception as e:
-                    logger.error(f"Error processing URL {url}: {e}")
-                    return None
+    async def _process_website_task(self, url: str, task_id: str) -> None:
+        """Background task for website processing with status updates."""
+        try:
+            # Initialize status
+            urls = await self._fetch_sitemap(url)
+            status = ProcessingStatus(
+                total_urls=len(urls),
+                remaining_urls=urls.copy(),
+                status=TaskStatus.IN_PROGRESS
+            )
+            await self.task_store.update_task(task_id, status)
 
-        finally:
-            self.processing_urls.remove(url)
+            # Process URLs
+            for url in urls:
+                success = await self._process_url(url, task_id)
+                
+                # Update status
+                status.remaining_urls.remove(url)
+                if success:
+                    status.processed_urls.append(url)
+                else:
+                    status.failed_urls.append(url)
+                
+                status.percent_complete = (len(status.processed_urls) / status.total_urls) * 100
+                await self.task_store.update_task(task_id, status)
 
-    async def process_website(self) -> dict:
-        """Process entire website concurrently."""
-        urls = await self._fetch_sitemap()
+            # Complete status
+            status.status = TaskStatus.COMPLETED
+            status.current_url = None
+            await self.task_store.update_task(task_id, status)
 
-        # Process URLs concurrently
-        tasks = [self._process_url(url) for url in urls]
-        await asyncio.gather(*tasks)
-
-        return {
-            "processed_pages": self.processed_pages,
-            "processed_urls": self.processed_urls,
-        }
-
-
-async def process_website_pages(
-    url: str,
-    indexer: IndexerService,
-    max_concurrent_requests: int = 10,
-) -> Optional[dict]:
-    """
-    Process website pages concurrently with proper resource management.
-    """
-    try:
-        client = WebsiteClient(
-            url,
-            indexer,
-            max_concurrent_requests,
-        )
-        return await client.process_website()
-
-    except Exception as e:
-        logger.error(f"Website processing failed: {str(e)}")
-        logger.exception("Detailed error trace:")
-        return None
+        except Exception as e:
+            logger.error(f"Website processing failed: {str(e)}")
+            status = ProcessingStatus(
+                status=TaskStatus.FAILED,
+                error=str(e)
+            )
+            await self.task_store.update_task(task_id, status)
