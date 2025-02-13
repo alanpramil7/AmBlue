@@ -2,28 +2,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, HttpUrl
 
 from src.services.indexer_service import IndexerService
-from src.services.website_service import WebsiteProcessor, TaskStore
+from src.services.website_service import TaskStore, WebsiteService
 from src.utils.dependency import get_indexer
 
 
 class WebsiteProcessingRequest(BaseModel):
     """Pydantic model for website processing request."""
+
     url: HttpUrl = Field(..., description="Website URL to process")
     max_concurrent_requests: int = Field(
-        default=10,
-        description="Maximum concurrent requests"
+        default=10, description="Maximum concurrent requests"
     )
 
     class Config:
-        json_schema_extra = {
-            "example": {
-                "url": "https://example.com"
-            }
-        }
+        json_schema_extra = {"example": {"url": "https://example.com"}}
 
 
 class ProcessingStatusResponse(BaseModel):
     """Pydantic model for processing status response."""
+
     status: str
     total_urls: int
     processed_urls: list[str]
@@ -39,29 +36,37 @@ router = APIRouter(prefix="/website", tags=["website"])
 task_store = TaskStore()
 
 
-def get_processor(indexer: IndexerService = Depends(get_indexer)) -> WebsiteProcessor:
-    return WebsiteProcessor(indexer, task_store)
+def get_processor(indexer: IndexerService = Depends(get_indexer)) -> WebsiteService:
+    return WebsiteService(indexer, task_store)
 
 
 @router.post("/", response_model=dict)
 async def start_website_processing(
     request: WebsiteProcessingRequest,
-    processor: WebsiteProcessor = Depends(get_processor),
+    processor: WebsiteService = Depends(get_processor),
 ) -> dict:
     """
     Start website processing and return task ID for status tracking.
     """
     try:
+        # Check if URL is already being processed or has been processed
+        existing_task_id = await processor.task_store.get_task_by_url(str(request.url))
+        if existing_task_id:
+            return {
+                "status": "already_processing",
+                "task_id": existing_task_id,
+                "message": "Website is already being processed",
+            }
+
         task_id = await processor.process_website(str(request.url))
         return {
             "status": "started",
             "task_id": task_id,
-            "message": "Website processing started"
+            "message": "Website processing started",
         }
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 
@@ -75,8 +80,7 @@ async def get_processing_status(
     task = await task_store.get_task(task_id)
     if not task:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
         )
 
     return ProcessingStatusResponse(
@@ -87,5 +91,5 @@ async def get_processing_status(
         failed_urls=task.status.failed_urls,
         current_url=task.status.current_url,
         percent_complete=task.status.percent_complete,
-        error=task.status.error
+        error=task.status.error,
     )

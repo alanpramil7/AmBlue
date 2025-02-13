@@ -1,10 +1,10 @@
+import asyncio
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Set
 from urllib.parse import urljoin
-import asyncio
-import xml.etree.ElementTree as ET
 from uuid import uuid4
 
 import httpx
@@ -32,7 +32,7 @@ class ProcessingStatus:
     percent_complete: float = 0
     status: TaskStatus = TaskStatus.PENDING
     error: Optional[str] = None
-    
+
     def __post_init__(self):
         self.processed_urls = self.processed_urls or []
         self.remaining_urls = self.remaining_urls or []
@@ -50,39 +50,55 @@ class TaskInfo:
 
 class TaskStore:
     """In-memory task storage"""
+
     def __init__(self):
         self.tasks: Dict[str, TaskInfo] = {}
         self._lock = asyncio.Lock()
-    
+
     async def create_task(self, url: str) -> str:
         async with self._lock:
             # Check if URL is already being processed
             for task in self.tasks.values():
-                if task.url == url and task.status.status in [TaskStatus.PENDING, TaskStatus.IN_PROGRESS]:
+                if task.url == url and task.status.status in [
+                    TaskStatus.PENDING,
+                    TaskStatus.IN_PROGRESS,
+                ]:
                     return task.id
-            
+
             task_id = str(uuid4())
             self.tasks[task_id] = TaskInfo(
                 id=task_id,
                 url=url,
                 status=ProcessingStatus(),
                 created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
             )
             return task_id
-    
+
     async def update_task(self, task_id: str, status: ProcessingStatus) -> None:
         async with self._lock:
             if task_id in self.tasks:
                 self.tasks[task_id].status = status
                 self.tasks[task_id].updated_at = datetime.utcnow()
-    
+
     async def get_task(self, task_id: str) -> Optional[TaskInfo]:
         async with self._lock:
             return self.tasks.get(task_id)
 
+    async def get_task_by_url(self, url: str) -> Optional[str]:
+        """Get task ID by URL if it is already being processed or has been processed."""
+        async with self._lock:
+            for task_id, task in self.tasks.items():
+                if task.url == url and task.status.status in [
+                    TaskStatus.PENDING,
+                    TaskStatus.IN_PROGRESS,
+                    TaskStatus.COMPLETED,
+                ]:
+                    return task_id
+            return None
 
-class WebsiteProcessor:
+
+class WebsiteService:
     def __init__(
         self,
         indexer: IndexerService,
@@ -122,7 +138,7 @@ class WebsiteProcessor:
         try:
             async with self.semaphore:
                 logger.info(f"Processing URL: {url}")
-                
+
                 # Update current URL in status
                 task = await self.task_store.get_task(task_id)
                 if task:
@@ -161,22 +177,24 @@ class WebsiteProcessor:
             status = ProcessingStatus(
                 total_urls=len(urls),
                 remaining_urls=urls.copy(),
-                status=TaskStatus.IN_PROGRESS
+                status=TaskStatus.IN_PROGRESS,
             )
             await self.task_store.update_task(task_id, status)
 
             # Process URLs
             for url in urls:
                 success = await self._process_url(url, task_id)
-                
+
                 # Update status
                 status.remaining_urls.remove(url)
                 if success:
                     status.processed_urls.append(url)
                 else:
                     status.failed_urls.append(url)
-                
-                status.percent_complete = (len(status.processed_urls) / status.total_urls) * 100
+
+                status.percent_complete = (
+                    len(status.processed_urls) / status.total_urls
+                ) * 100
                 await self.task_store.update_task(task_id, status)
 
             # Complete status
@@ -186,8 +204,5 @@ class WebsiteProcessor:
 
         except Exception as e:
             logger.error(f"Website processing failed: {str(e)}")
-            status = ProcessingStatus(
-                status=TaskStatus.FAILED,
-                error=str(e)
-            )
+            status = ProcessingStatus(status=TaskStatus.FAILED, error=str(e))
             await self.task_store.update_task(task_id, status)
