@@ -333,19 +333,23 @@ class WikiService:
                 docs = []
 
                 for page in chunk:
+                    logger.info(f"Processing page {page.page_path}")
                     try:
                         if not page.content.strip():
+                            logger.info(f"No content found. For page {page.page_path}")
                             continue
 
                         lines = [line.strip() for line in page.content.split("\n")]
                         non_empty_lines = [line for line in lines if line]
 
                         if not non_empty_lines:
+                            logger.info(f"Empty line. For page {page.page_path}")
                             continue
 
                         if len(non_empty_lines) == 1:
                             line = non_empty_lines[0]
-                            if line.startswith("#") or line.startswith("!["): 
+                            if line.startswith("#") or line.startswith("!["):
+                                logger.info(f"Bad Content. For page {page.page_path}")
                                 continue
 
                         doc = Document(
@@ -356,6 +360,7 @@ class WikiService:
                                 "project": project,
                             },
                         )
+                        # logger.info(f"Document for {page.page_path} \n\n {doc.page_content[:200]} \n\n")
                         docs.append(doc)
                         processed_pages.append(page.page_path)
                     except Exception as e:
@@ -363,8 +368,10 @@ class WikiService:
                         failed_pages.append(page.page_path)
 
                 if docs:
-                    await self.indexer.vector_store.aadd_documents(docs)
-                    logger.info(f"Processed chunk of {len(docs)} documents")
+                    logger.info(f"Adding {len(docs)} into vector store.")
+                    chunks = self.indexer.text_splitter.split_documents(docs)
+                    await self.indexer.vector_store.aadd_documents(chunks)
+                    logger.info(f"Added {len(chunks)} chunks into vectorstore.")
 
                 # Update task status
                 remaining_pages = [p for p in remaining_pages if p not in processed_pages and p not in failed_pages]

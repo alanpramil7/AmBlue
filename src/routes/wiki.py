@@ -89,11 +89,8 @@ async def start_wiki_processing(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
-
-
-
-
-
+        
+        
 @router.get("/status/{task_id}", response_model=ProcessingStatusResponse)
 async def get_processing_status(
     task_id: str,

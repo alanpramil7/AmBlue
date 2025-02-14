@@ -3,6 +3,7 @@ from typing import Annotated, AsyncGenerator, List, Sequence
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableConfig
 from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import MemorySaver
 
 # LangGraph and LLM imports for building the state graph.
@@ -48,10 +49,10 @@ class AgentService:
             Node function that invokes the language model using the provided conversation messages.
             It takes the current state, calls the LLM with the messages, and returns the updated state.
             """
-            logger.info("Invoking LLM in chatbot node with state messages.")
+            logger.info(f"Invoking LLM in chatbot node with state messages.\n\n {state["messages"][-4:]} \n\n")
             # Call the LLM synchronously using the current conversation messages.
             # logger.info(f"Message sent to model: {state['messages'][-3:]}")
-            response = await self.llm.ainvoke(state["messages"][-3:])
+            response = await self.llm.ainvoke(state["messages"][-4:])
             # Return the response wrapped in a dictionary under "messages".
             return {"messages": [response]}
 
@@ -77,7 +78,7 @@ class AgentService:
         logger.info(f"Retrieving documents for query: {query}")
 
         # Define search parameters (for example, retrieve the top 5 relevant docs).
-        search_kwargs = {"k": 3}
+        search_kwargs = {"k": 10}
 
         # Ensure that the vector store has been initialized.
         if not self.indexer.vector_store:
@@ -123,17 +124,24 @@ class AgentService:
             context = "\n\n".join([doc.page_content for doc in docs])
             system_message = {
                 "role": "system",
-                "content": f"""You are a helpful assistant. Here's how to respond:
+                "content": f"""You are a knowledgeable and precise assistant. Follow these guidelines:
 
-                1. If the question is general, answer it directly using your knowledge.
+                1. Knowledge Synthesis:
+                   - For general questions: Provide accurate, concise answers based on your knowledge
+                   - For specific queries: Analyze and incorporate the following context:
+                   {context}
 
-                2. If the question requires specific information, use this context to help answer:
-                {context}
+                2. Response Structure:
+                   - Start with the most relevant information
+                   - Support claims with specific examples or references from the context
+                   - Use clear, professional language
 
-                3. If the question is too specific and the context doesn't provide enough information, 
-                politely ask the user to clarify or rephrase their question.
+                3. Quality Control:
+                   - If the context is insufficient: Acknowledge limitations and request clarification
+                   - If uncertain: State your confidence level and what you know for sure
+                   - Avoid speculation and clearly distinguish between facts and interpretations
 
-                Please ensure your responses are accurate and helpful.""",
+                Remember to be direct, accurate, and focused on addressing the user's specific needs."""
             }
             messages.append(system_message)
 
