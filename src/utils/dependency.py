@@ -1,6 +1,7 @@
 from typing import Optional
 
 from src.services.indexer_service import IndexerService
+from src.services.database_service import DatabaseService
 
 
 class Dependency:
@@ -11,6 +12,7 @@ class Dependency:
 
     # Class variable to store single instance
     _indexer_instance: Optional[IndexerService] = None
+    _database_instance: Optional[DatabaseService] = None
 
     @classmethod
     def get_indexer_instance(cls) -> IndexerService:
@@ -29,6 +31,23 @@ class Dependency:
         except Exception as e:
             raise Exception(f"Error initializing Indexer: {str(e)}")
 
+    @classmethod
+    def get_database_instance(cls) -> DatabaseService:
+        """
+        Get or create the Database instance.
+
+        Returns:
+            Database: The singleton instance of the Database
+        """
+        try:
+            if cls._database_instance is None:
+                cls._database_instance = DatabaseService()
+                if not cls._database_instance.is_initialized:
+                    cls._database_instance.initialize()
+            return cls._database_instance
+        except Exception as e:
+            raise Exception(f"Error initializing Indexer: {str(e)}")
+
 
 def get_indexer():
     """
@@ -38,3 +57,8 @@ def get_indexer():
         Indexer: The singleton Indexer instance
     """
     return Dependency.get_indexer_instance()
+
+
+def get_database():
+    """"""
+    return Dependency.get_database_instance()

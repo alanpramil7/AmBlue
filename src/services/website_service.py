@@ -3,15 +3,15 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
 from uuid import uuid4
 
 import httpx
 from langchain_community.document_loaders import WebBaseLoader
-from pydantic import HttpUrl
 
 from src.services.indexer_service import IndexerService
+from src.services.database_service import DatabaseService
 from src.utils.logger import logger
 
 

@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, HttpUrl
 
 from src.services.indexer_service import IndexerService
+from src.services.database_service import DatabaseService
 from src.services.website_service import TaskStore, WebsiteService
-from src.utils.dependency import get_indexer
+from src.utils.dependency import get_indexer, get_database
+from src.utils.logger import logger
 
 
 class WebsiteProcessingRequest(BaseModel):
@@ -44,21 +46,33 @@ def get_processor(indexer: IndexerService = Depends(get_indexer)) -> WebsiteServ
 async def start_website_processing(
     request: WebsiteProcessingRequest,
     processor: WebsiteService = Depends(get_processor),
+    database: DatabaseService = Depends(get_database),
 ) -> dict:
     """
     Start website processing and return task ID for status tracking.
     """
     try:
+        task = database.get_task_by_url(str(request.url))
+        logger.info(f"Task details: {task}")
         # Check if URL is already being processed or has been processed
-        existing_task_id = await processor.task_store.get_task_by_url(str(request.url))
-        if existing_task_id:
+        # existing_task_id = await processor.task_store.get_task_by_url(str(request.url))
+        # if existing_task_id:
+        #     return {
+        #         "status": "already_processing",
+        #         "task_id": existing_task_id,
+        #         "message": "Website is already being processed",
+        #     }
+
+        if task:
+            logger.info("Website is already processed.")
             return {
-                "status": "already_processing",
-                "task_id": existing_task_id,
-                "message": "Website is already being processed",
+                "status": task[2],
+                "task_id": task[0],
+                "message": "Website is processed.",
             }
 
         task_id = await processor.process_website(str(request.url))
+        database.add_task(task_id, str(request.url), "processing")
         return {
             "status": "started",
             "task_id": task_id,
