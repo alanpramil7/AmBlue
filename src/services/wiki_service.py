@@ -13,10 +13,12 @@ from langchain_core.documents import Document
 
 from src.services.indexer_service import IndexerService
 from src.utils.logger import logger
+from src.services.database_service import DatabaseService
 
 
 class TaskStatus(Enum):
     """Enum for task processing status."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -26,6 +28,7 @@ class TaskStatus(Enum):
 @dataclass
 class TaskInfo:
     """Information about a task's status and progress."""
+
     status: TaskStatus
     total_pages: int
     processed_pages: list[str]
@@ -39,12 +42,14 @@ class TaskInfo:
 @dataclass
 class Task:
     """Represents a processing task."""
+
     id: str
     status: TaskInfo
 
 
 class TaskStore:
     """Store for tracking task status and progress."""
+
     def __init__(self):
         self.tasks: Dict[str, Task] = {}
         self._lock = asyncio.Lock()
@@ -79,7 +84,9 @@ class TaskStore:
             if task_id in self.tasks:
                 self.tasks[task_id].status = status
 
-    async def get_task_by_wiki(self, organization: str, project: str, wiki_identifier: str) -> Optional[str]:
+    async def get_task_by_wiki(
+        self, organization: str, project: str, wiki_identifier: str
+    ) -> Optional[str]:
         """Get task ID by wiki details if it is already being processed."""
         task_id = f"{organization}_{project}_{wiki_identifier}"
         async with self._lock:
@@ -262,9 +269,9 @@ class WikiClient:
 class WikiService:
     """Service for processing wiki pages with task tracking."""
 
-    def __init__(self, indexer: IndexerService, task_store: TaskStore):
+    def __init__(self, indexer: IndexerService, database: DatabaseService):
         self.indexer = indexer
-        self.task_store = task_store
+        self.database = database
 
     async def _process_wiki_pages(
         self,
@@ -285,7 +292,7 @@ class WikiService:
 
             if not pages:
                 logger.info("No Pages found.")
-                await self.task_store.update_task(
+                self.database.update_wiki_task(
                     task_id,
                     TaskInfo(
                         status=TaskStatus.COMPLETED,
@@ -309,7 +316,7 @@ class WikiService:
             remaining_pages = [page.page_path for page in pages]
 
             # Update initial status
-            await self.task_store.update_task(
+            self.database.update_wiki_task(
                 task_id,
                 TaskInfo(
                     status=TaskStatus.IN_PROGRESS,
@@ -364,7 +371,9 @@ class WikiService:
                         docs.append(doc)
                         processed_pages.append(page.page_path)
                     except Exception as e:
-                        logger.error(f"Error processing page {page.page_path}: {str(e)}")
+                        logger.error(
+                            f"Error processing page {page.page_path}: {str(e)}"
+                        )
                         failed_pages.append(page.page_path)
 
                 if docs:
@@ -374,10 +383,16 @@ class WikiService:
                     logger.info(f"Added {len(chunks)} chunks into vectorstore.")
 
                 # Update task status
-                remaining_pages = [p for p in remaining_pages if p not in processed_pages and p not in failed_pages]
-                percent_complete = (len(processed_pages) + len(failed_pages)) / total_pages * 100
+                remaining_pages = [
+                    p
+                    for p in remaining_pages
+                    if p not in processed_pages and p not in failed_pages
+                ]
+                percent_complete = (
+                    (len(processed_pages) + len(failed_pages)) / total_pages * 100
+                )
 
-                await self.task_store.update_task(
+                self.database.update_wiki_task(
                     task_id,
                     TaskInfo(
                         status=TaskStatus.IN_PROGRESS,
@@ -392,8 +407,10 @@ class WikiService:
                 )
 
             # Update final status
-            final_status = TaskStatus.COMPLETED if not failed_pages else TaskStatus.FAILED
-            await self.task_store.update_task(
+            final_status = (
+                TaskStatus.COMPLETED if not failed_pages else TaskStatus.FAILED
+            )
+            self.database.update_wiki_task(
                 task_id,
                 TaskInfo(
                     status=final_status,
@@ -403,13 +420,15 @@ class WikiService:
                     failed_pages=failed_pages,
                     current_page=None,
                     percent_complete=100.0,
-                    error=f"Failed to process {len(failed_pages)} pages" if failed_pages else None,
+                    error=f"Failed to process {len(failed_pages)} pages"
+                    if failed_pages
+                    else None,
                 ),
             )
 
         except Exception as e:
             logger.error(f"Error processing wiki: {str(e)}")
-            await self.task_store.update_task(
+            self.database.update_wiki_task(
                 task_id,
                 TaskInfo(
                     status=TaskStatus.FAILED,
@@ -431,10 +450,11 @@ class WikiService:
         max_concurrent_requests: int = 10,
     ) -> str:
         """Start wiki processing in the background and return task ID."""
-        task_id = f"{organization}_{project}_{wiki_identifier}"
+        # Make organization lowercase in task_id to ensure consistency
+        task_id = f"{organization.lower()}_{project}_{wiki_identifier}"
 
         # Create task with initial status
-        await self.task_store.create_task(task_id, 0)
+        self.database.create_wiki_task(task_id, organization, project, wiki_identifier)
 
         # Start processing in background
         asyncio.create_task(

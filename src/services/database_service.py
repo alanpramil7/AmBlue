@@ -1,8 +1,12 @@
 import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import logging
 
 from src.types.website import ProcessingStatus, TaskStatus
+from src.types.wiki import TaskInfo
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
@@ -37,6 +41,25 @@ class DatabaseService:
                     remaining_urls TEXT,
                     failed_urls TEXT,
                     current_url TEXT,
+                    percent_complete REAL,
+                    error TEXT,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS wiki_tasks(
+                    task_id TEXT PRIMARY KEY,
+                    organization TEXT,
+                    project TEXT,
+                    wiki_identifier TEXT,
+                    status TEXT,
+                    total_pages INTEGER,
+                    processed_pages TEXT,
+                    remaining_pages TEXT,
+                    failed_pages TEXT,
+                    current_page TEXT,
                     percent_complete REAL,
                     error TEXT,
                     created_at TIMESTAMP,
@@ -152,3 +175,108 @@ class DatabaseService:
                 return None
 
             return {"task_id": row[0], "url": row[1], "status": row[2]}
+
+    def create_wiki_task(
+        self, task_id: str, organization: str, project: str, wiki_identifier: str
+    ) -> None:
+        """Create a new wiki processing task"""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO wiki_tasks 
+                (task_id, organization, project, wiki_identifier, status, total_pages,
+                processed_pages, remaining_pages, failed_pages, current_page,
+                percent_complete, error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    organization,
+                    project,
+                    wiki_identifier,
+                    TaskStatus.PENDING.value,
+                    0,
+                    "",
+                    "",
+                    "",
+                    None,
+                    0.0,
+                    None,
+                    datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
+
+    def update_wiki_task(self, task_id: str, status: TaskInfo) -> None:
+        """Update wiki task status"""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE wiki_tasks 
+                SET status = ?, total_pages = ?, processed_pages = ?, remaining_pages = ?,
+                failed_pages = ?, current_page = ?, percent_complete = ?, error = ?,
+                updated_at = ?
+                WHERE task_id = ?""",
+                (
+                    status.status.value,
+                    status.total_pages,
+                    ",".join(status.processed_pages),
+                    ",".join(status.remaining_pages),
+                    ",".join(status.failed_pages),
+                    status.current_page,
+                    status.percent_complete,
+                    status.error,
+                    datetime.utcnow(),
+                    task_id,
+                ),
+            )
+
+    def get_wiki_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get wiki task by ID"""
+        logger.info(f"Fetching wiki task from database: {task_id}")
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM wiki_tasks WHERE task_id = ?", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                logger.error(f"No task found in database with ID: {task_id}")
+                return None
+
+            logger.info(f"Found task in database: {row}")
+            return {
+                "task_id": row[0],
+                "organization": row[1],
+                "project": row[2],
+                "wiki_identifier": row[3],
+                "status": {
+                    "status": TaskStatus(row[4]),
+                    "total_pages": row[5],
+                    "processed_pages": row[6].split(",") if row[6] else [],
+                    "remaining_pages": row[7].split(",") if row[7] else [],
+                    "failed_pages": row[8].split(",") if row[8] else [],
+                    "current_page": row[9],
+                    "percent_complete": row[10],
+                    "error": row[11],
+                },
+                "created_at": datetime.fromisoformat(row[12]),
+                "updated_at": datetime.fromisoformat(row[13]),
+            }
+
+    def get_wiki_task_by_details(
+        self, organization: str, project: str, wiki_identifier: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get wiki task by organization, project and wiki identifier"""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT * FROM wiki_tasks 
+                WHERE organization = ? AND project = ? AND wiki_identifier = ?""",
+                (organization, project, wiki_identifier),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            return {
+                "task_id": row[0],
+                "status": row[4],
+            }
