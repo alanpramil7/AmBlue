@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from src.services.indexer_service import IndexerService
 from src.services.database_service import DatabaseService
-from src.services.website_service import TaskStore, WebsiteService
+from src.services.website_service import WebsiteService
 from src.utils.dependency import get_indexer, get_database
 from src.utils.logger import logger
 
@@ -33,13 +33,15 @@ class ProcessingStatusResponse(BaseModel):
     error: str | None
 
 
-# Initialize router and task store
+# Initialize router
 router = APIRouter(prefix="/website", tags=["website"])
-task_store = TaskStore()
 
 
-def get_processor(indexer: IndexerService = Depends(get_indexer)) -> WebsiteService:
-    return WebsiteService(indexer, task_store)
+def get_processor(
+    indexer: IndexerService = Depends(get_indexer),
+    database: DatabaseService = Depends(get_database),
+) -> WebsiteService:
+    return WebsiteService(indexer, database)
 
 
 @router.post("/", response_model=dict)
@@ -52,27 +54,18 @@ async def start_website_processing(
     Start website processing and return task ID for status tracking.
     """
     try:
-        task = database.get_task_by_url(str(request.url))
-        logger.info(f"Task details: {task}")
-        # Check if URL is already being processed or has been processed
-        # existing_task_id = await processor.task_store.get_task_by_url(str(request.url))
-        # if existing_task_id:
-        #     return {
-        #         "status": "already_processing",
-        #         "task_id": existing_task_id,
-        #         "message": "Website is already being processed",
-        #     }
-
-        if task:
+        # Check if URL is already being processed
+        existing_task = database.get_task_by_url(str(request.url))
+        if existing_task:
             logger.info("Website is already processed.")
             return {
-                "status": task[2],
-                "task_id": task[0],
-                "message": "Website is processed.",
+                "status": existing_task["status"],
+                "task_id": existing_task["task_id"],
+                "message": "Website is already being processed or processed.",
             }
 
+        # Start new processing task - the processor will create the task record
         task_id = await processor.process_website(str(request.url))
-        database.add_task(task_id, str(request.url), "processing")
         return {
             "status": "started",
             "task_id": task_id,
@@ -86,24 +79,24 @@ async def start_website_processing(
 
 @router.get("/status/{task_id}", response_model=ProcessingStatusResponse)
 async def get_processing_status(
-    task_id: str,
+    task_id: str, database: DatabaseService = Depends(get_database)
 ) -> ProcessingStatusResponse:
     """
     Get detailed processing status for frontend tracking.
     """
-    task = await task_store.get_task(task_id)
+    task = database.get_task(task_id)
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
         )
 
     return ProcessingStatusResponse(
-        status=task.status.status.value,
-        total_urls=task.status.total_urls,
-        processed_urls=task.status.processed_urls,
-        remaining_urls=task.status.remaining_urls,
-        failed_urls=task.status.failed_urls,
-        current_url=task.status.current_url,
-        percent_complete=task.status.percent_complete,
-        error=task.status.error,
+        status=task["status"]["status"].value,
+        total_urls=task["status"]["total_urls"],
+        processed_urls=task["status"]["processed_urls"],
+        remaining_urls=task["status"]["remaining_urls"],
+        failed_urls=task["status"]["failed_urls"],
+        current_url=task["status"]["current_url"],
+        percent_complete=task["status"]["percent_complete"],
+        error=task["status"]["error"],
     )
