@@ -1,7 +1,7 @@
+import logging
 import sqlite3
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-import logging
+from typing import Any, Dict, Optional
 
 from src.types.website import ProcessingStatus, TaskStatus
 from src.types.wiki import TaskInfo

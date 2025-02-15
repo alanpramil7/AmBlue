@@ -31,7 +31,8 @@ Initiates asynchronous processing of a website's content.
 
 ```json
 {
-  "url": "https://example.com"
+  "url": "https://example.com",
+  "max_concurrent_requests": 10
 }
 ```
 
@@ -39,8 +40,8 @@ Initiates asynchronous processing of a website's content.
 
 ```json
 {
+  "status": "started",
   "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "pending",
   "message": "Website processing started"
 }
 ```
@@ -57,7 +58,6 @@ Returns the current status of a website processing task.
 
 ```json
 {
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "in_progress",
   "total_urls": 100,
   "processed_urls": ["https://example.com/page1", "https://example.com/page2"],
@@ -83,7 +83,8 @@ Initiates asynchronous processing of an Azure DevOps wiki.
 {
   "organization": "cloudcadi",
   "project": "CloudCADI",
-  "wikiIdentifier": "CloudCADI.wiki"
+  "wikiIdentifier": "CloudCADI.wiki",
+  "max_concurrent_requests": 10
 }
 ```
 
@@ -91,8 +92,8 @@ Initiates asynchronous processing of an Azure DevOps wiki.
 
 ```json
 {
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "pending",
+  "status": "started",
+  "task_id": "cloudcadi_cloudcadi_cloudcadi.wiki",
   "message": "Wiki processing started"
 }
 ```
@@ -109,7 +110,6 @@ Returns the current status of a wiki processing task.
 
 ```json
 {
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "in_progress",
   "total_pages": 50,
   "processed_pages": ["/Home", "/Getting-Started"],
@@ -127,27 +127,18 @@ Returns the current status of a wiki processing task.
 POST /document
 ```
 
-Processes and indexes document files with support for multiple formats and concurrent processing.
+Processes and indexes document files with support for multiple formats.
 
 **Request**
 
 - Content-Type: multipart/form-data
 - Body:
   - file: Document file (required)
-  - metadata: Additional document metadata (optional)
 
 **Supported File Types**
 
 - PDF (.pdf)
 - Microsoft Word (.docx)
-
-**Processing Features**
-
-- Concurrent processing (max 5 simultaneous)
-- Automatic format detection
-- Content chunking
-- Vector embedding generation
-- Progress tracking
 
 **Success Response**
 
@@ -160,58 +151,33 @@ Processes and indexes document files with support for multiple formats and concu
 }
 ```
 
-**Error Responses**
+### Generate Agent Response
 
-1. Invalid File Format
+```http
+POST /agent
+```
+
+Generates a streaming response for a given question using the agent.
+
+**Request Body**
+
 ```json
 {
-  "error": "Invalid file format",
-  "message": "Unsupported file format: txt. Supported formats are: pdf, docx",
-  "code": "INVALID_FORMAT"
+  "question": "What is the capital of France?",
+  "user_id": "user123"
 }
 ```
 
-2. Processing Error
-```json
-{
-  "error": "Processing failed",
-  "message": "Failed to process document: detailed error message",
-  "code": "PROCESSING_ERROR"
-}
+**Response**
+
+Server-Sent Events (SSE) stream with the agent's response. Each event contains a chunk of the response.
+
+Example event:
 ```
+data: This is a part of the response...
 
-3. File Size Error
-```json
-{
-  "error": "File too large",
-  "message": "Document exceeds maximum allowed size",
-  "code": "SIZE_LIMIT_EXCEEDED"
-}
+data: Here is another part of the response...
 ```
-
-**Processing Pipeline**
-
-1. File Upload
-   - Format validation
-   - Size verification
-   - Temporary storage
-
-2. Document Processing
-   - Content extraction
-   - Text normalization
-   - Chunk generation
-
-3. Indexing
-   - Embedding generation
-   - Vector storage
-   - Metadata indexing
-
-**Notes**
-
-- Maximum file size: 10MB
-- Processing timeout: 5 minutes
-- Concurrent processing limit: 5 files
-- Supported languages: All (UTF-8 encoding)
 
 ## Error Responses
 
@@ -235,6 +201,15 @@ All endpoints may return the following error responses:
 }
 ```
 
+### 422 Unprocessable Entity
+
+```json
+{
+  "error": "Validation error",
+  "message": "Invalid data format"
+}
+```
+
 ### 500 Internal Server Error
 
 ```json
@@ -250,89 +225,12 @@ All endpoints are subject to rate limiting:
 
 - Maximum concurrent requests per client: 10
 - Rate limit window: 1 minute
-- Rate limit: 100 requests per minute
+- Maximum requests per window: 100
 
-When rate limited, the API will respond with:
+## Authentication
 
-### 429 Too Many Requests
-
-```json
-{
-  "error": "Rate limit exceeded",
-  "message": "Too many requests, please try again in X seconds"
-}
-```
-
-### Agent Response Generation
+Authentication is required for all endpoints except the health check. API keys should be provided in the Authorization header:
 
 ```http
-POST /agent/query
+Authorization: Bearer <api_key>
 ```
-
-Streams a response to a user query using RAG-based question answering.
-
-**Request Body**
-
-```json
-{
-  "query": "What are the key features of the system?",
-  "user_id": "user-123"
-}
-```
-
-**Response**
-
-Streams chunks of text as Server-Sent Events (SSE):
-
-```text
-data: Based on the available documentation,
-data: the system has several key features including:
-data: 1. Website content processing with sitemap support
-data: 2. Azure DevOps Wiki integration
-data: 3. Document processing for PDF and DOCX files
-...
-```
-
-**Features**
-
-- Real-time response streaming
-- Context-aware answers using RAG
-- User session management
-- Think-tag filtering
-- Error recovery
-
-### Health Check
-
-```http
-POST /agent
-```
-
-Generates a streaming response for a given question using the RAG agent.
-
-**Request Body**
-
-```json
-{
-  "question": "What is the capital of France?"
-}
-```
-
-**Response**
-
-- Content-Type: text/event-stream
-- Streaming response with Server-Sent Events (SSE)
-
-Example event:
-
-```text
-data: The capital of France is Paris.
-```
-
-## Error Responses
-
-| Status Code | Description                               |
-| ----------- | ----------------------------------------- |
-| 400         | Bad Request - Invalid parameters          |
-| 404         | Not Found                                 |
-| 422         | Unprocessable Entity - Invalid URL format |
-| 500         | Internal Server Error                     |

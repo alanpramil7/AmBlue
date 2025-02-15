@@ -49,7 +49,9 @@ class AgentService:
             Node function that invokes the language model using the provided conversation messages.
             It takes the current state, calls the LLM with the messages, and returns the updated state.
             """
-            logger.info(f"Invoking LLM in chatbot node with state messages.\n\n {state["messages"][-4:]} \n\n")
+            logger.info(
+                f"Invoking LLM in chatbot node with state messages.\n\n {state['messages'][-4:]} \n\n"
+            )
             # Call the LLM synchronously using the current conversation messages.
             # logger.info(f"Message sent to model: {state['messages'][-3:]}")
             response = await self.llm.ainvoke(state["messages"][-4:])
@@ -141,7 +143,7 @@ class AgentService:
                    - If uncertain: State your confidence level and what you know for sure
                    - Avoid speculation and clearly distinguish between facts and interpretations
 
-                Remember to be direct, accurate, and focused on addressing the user's specific needs."""
+                Remember to be direct, accurate, and focused on addressing the user's specific needs.""",
             }
             messages.append(system_message)
 

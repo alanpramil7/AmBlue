@@ -3,6 +3,7 @@ Wiki Routes Module with concurrent request handling
 """
 
 import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
@@ -10,9 +11,9 @@ from pydantic import BaseModel, Field
 from src.services.database_service import DatabaseService
 from src.services.indexer_service import IndexerService
 from src.services.wiki_service import WikiService
-from src.utils.dependency import get_indexer, get_database
+from src.types.wiki import TaskInfo, TaskStatus
+from src.utils.dependency import get_database, get_indexer
 from src.utils.logger import logger
-from src.types.wiki import TaskStatus, TaskInfo
 
 
 class WikiProcessingRequest(BaseModel):

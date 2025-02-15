@@ -1,7 +1,7 @@
 from typing import Optional
 
-from src.services.indexer_service import IndexerService
 from src.services.database_service import DatabaseService
+from src.services.indexer_service import IndexerService
 
 
 class Dependency:

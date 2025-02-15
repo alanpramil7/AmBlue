@@ -1,15 +1,15 @@
 import asyncio
-from typing import List
 import xml.etree.ElementTree as ET
+from typing import List
 from urllib.parse import urljoin
 from uuid import uuid4
 
 import httpx
 from langchain_community.document_loaders import WebBaseLoader
 
-from src.services.indexer_service import IndexerService
 from src.services.database_service import DatabaseService
-from src.types.website import ProcessingStatus, TaskStatus, TaskInfo
+from src.services.indexer_service import IndexerService
+from src.types.website import ProcessingStatus, TaskStatus
 from src.utils.logger import logger
 
 

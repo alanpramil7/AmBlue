@@ -11,9 +11,9 @@ import cachetools
 from aiohttp import ClientSession, TCPConnector
 from langchain_core.documents import Document
 
+from src.services.database_service import DatabaseService
 from src.services.indexer_service import IndexerService
 from src.utils.logger import logger
-from src.services.database_service import DatabaseService
 
 
 class TaskStatus(Enum):

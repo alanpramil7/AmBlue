@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, HttpUrl
 
-from src.services.indexer_service import IndexerService
 from src.services.database_service import DatabaseService
+from src.services.indexer_service import IndexerService
 from src.services.website_service import WebsiteService
-from src.utils.dependency import get_indexer, get_database
+from src.utils.dependency import get_database, get_indexer
 from src.utils.logger import logger
 
 
