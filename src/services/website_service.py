@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import xml.etree.ElementTree as ET
 from typing import List
 from urllib.parse import urljoin
@@ -25,6 +26,11 @@ class WebsiteService:
         self.database = database
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
         self.connection_timeout = connection_timeout
+        self.processed_hashes = set()
+
+    def _get_content_hash(self, content: str) -> str:
+        """Generate a unique hash for content and URL combination."""
+        return hashlib.md5(f"{content}".encode()).hexdigest()
 
     async def _fetch_sitemap(self, base_url: str) -> List[str]:
         """Fetch and parse sitemap URLs."""
@@ -49,7 +55,7 @@ class WebsiteService:
             return [base_url]
 
     async def _process_url(self, url: str, task_id: str) -> bool:
-        """Process a single URL with status updates."""
+        """Process a single URL with status updates and deduplication."""
         try:
             async with self.semaphore:
                 logger.info(f"Processing URL: {url}")
@@ -76,10 +82,19 @@ class WebsiteService:
                     return False
 
                 chunks = self.indexer.text_splitter.split_documents(docs)
+                unique_chunks = []
+
                 for chunk in chunks:
                     chunk.metadata["source"] = url
+                    content_hash = self._get_content_hash(chunk.page_content)
 
-                await self.indexer.vector_store.aadd_documents(chunks)
+                    if content_hash not in self.processed_hashes:
+                        self.processed_hashes.add(content_hash)
+                        chunk.metadata["content_hash"] = content_hash
+                        unique_chunks.append(chunk)
+
+                if unique_chunks:
+                    await self.indexer.vector_store.aadd_documents(unique_chunks)
                 return True
 
         except Exception as e:

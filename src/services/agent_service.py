@@ -80,7 +80,7 @@ class AgentService:
         logger.info(f"Retrieving documents for query: {query}")
 
         # Define search parameters (for example, retrieve the top 5 relevant docs).
-        search_kwargs = {"k": 10}
+        search_kwargs = {"k": 5}
 
         # Ensure that the vector store has been initialized.
         if not self.indexer.vector_store:
@@ -93,11 +93,16 @@ class AgentService:
 
         # Retrieve documents for the given query.
         docs = await retriever.ainvoke(query)
+        logger.info(docs)
 
-        # for i, doc in enumerate(docs):
-        #     logger.info(
-        #         f"----------Documument {i}---------------------\n {doc.page_content}"
-        #     )
+        for i, doc in enumerate(docs):
+            with open("full-content.txt", "a") as file:
+                file.write(
+                    f"----------Documument {i}---------------------\n {doc.page_content}\n"
+                )
+            # logger.info(
+            #     f"----------Documument {i}---------------------\n {doc.page_content}"
+            # )
 
         logger.info(f"Retrieved {len(docs)} documents for query: {query}")
         return docs

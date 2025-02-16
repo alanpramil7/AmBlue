@@ -353,14 +353,58 @@ class WikiService:
                             logger.info(f"Empty line. For page {page.page_path}")
                             continue
 
-                        if len(non_empty_lines) == 1:
-                            line = non_empty_lines[0]
-                            if line.startswith("#") or line.startswith("!["):
-                                logger.info(f"Bad Content. For page {page.page_path}")
-                                continue
+                        # Filter out pages with only headers, images, links, or minimal content
+                        def is_valid_content(lines: List[str]) -> bool:
+                            valid_content = False
+
+                            for line in lines:
+                                line = line.strip()
+                                if not line:
+                                    continue
+
+                                # Skip single character lines (like ".")
+                                if len(line) <= 1:
+                                    continue
+
+                                # Skip header-only lines
+                                if line.startswith("#"):
+                                    continue
+
+                                # Skip image-only lines
+                                if line.startswith("![") and line.endswith(")"):
+                                    continue
+
+                                # Skip link-only lines
+                                if (line.startswith("[") and line.endswith(")")) or (
+                                    line.startswith("(") and line.endswith(")")
+                                ):
+                                    continue
+
+                                # Skip URL-only lines
+                                if line.startswith("http://") or line.startswith(
+                                    "https://"
+                                ):
+                                    continue
+
+                                # Skip table of contents
+                                if line.strip() == "[[_TOSP_]]":
+                                    continue
+
+                                if line.strip() == "[[_TOC_]]":
+                                    continue
+
+                                valid_content = True
+
+                            return valid_content
+
+                        if not is_valid_content(non_empty_lines):
+                            logger.info(
+                                f"Skipping page {page.page_path} - Invalid content"
+                            )
+                            continue
 
                         doc = Document(
-                            page_content=page.content,
+                            page_content=f"{page.page_path}\n{page.content}",
                             metadata={
                                 "source": f"wiki_{page.page_path}",
                                 "organization": organization,
@@ -378,9 +422,9 @@ class WikiService:
 
                 if docs:
                     logger.info(f"Adding {len(docs)} into vector store.")
-                    chunks = self.indexer.text_splitter.split_documents(docs)
-                    await self.indexer.vector_store.aadd_documents(chunks)
-                    logger.info(f"Added {len(chunks)} chunks into vectorstore.")
+                    # chunks = self.indexer.text_splitter.split_documents(docs)
+                    await self.indexer.vector_store.aadd_documents(docs)
+                    logger.info(f"Added {len(docs)} chunks into vectorstore.")
 
                 # Update task status
                 remaining_pages = [

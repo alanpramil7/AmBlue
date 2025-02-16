@@ -2,16 +2,12 @@
 Wiki Routes Module with concurrent request handling
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 
 from src.services.database_service import DatabaseService
 from src.services.indexer_service import IndexerService
 from src.services.wiki_service import WikiService
-from src.types.wiki import TaskInfo, TaskStatus
 from src.utils.dependency import get_database, get_indexer
 from src.utils.logger import logger
 
@@ -113,7 +109,7 @@ async def get_processing_status(
             status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
         )
 
-    logger.info(f"Found task status: {task['status']}")
+    # logger.info(f"Found task status: {task['status']}")
     return ProcessingStatusResponse(
         status=task["status"]["status"].value,
         total_pages=task["status"]["total_pages"],
