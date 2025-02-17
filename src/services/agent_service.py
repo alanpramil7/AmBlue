@@ -80,7 +80,7 @@ class AgentService:
         logger.info(f"Retrieving documents for query: {query}")
 
         # Define search parameters (for example, retrieve the top 5 relevant docs).
-        search_kwargs = {"k": 5}
+        search_kwargs = {"k": 7}
 
         # Ensure that the vector store has been initialized.
         if not self.indexer.vector_store:
@@ -148,7 +148,9 @@ class AgentService:
                    - If uncertain: State your confidence level and what you know for sure
                    - Avoid speculation and clearly distinguish between facts and interpretations
 
-                Remember to be direct, accurate, and focused on addressing the user's specific needs.""",
+                Remember to be direct, accurate, and focused on addressing the user's specific needs.
+                Keep the responses short and sweet.
+                IMPORTANT: if you dont know the answer just say don't know. NO other reasons.""",
             }
             messages.append(system_message)
 

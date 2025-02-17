@@ -34,6 +34,7 @@ class WebsiteService:
 
     async def _fetch_sitemap(self, base_url: str) -> List[str]:
         """Fetch and parse sitemap URLs."""
+        logger.info(f"Fetching sitemap for {base_url}")
         sitemap_url = urljoin(base_url, "sitemap.xml")
         try:
             async with httpx.AsyncClient(timeout=self.connection_timeout) as client:
@@ -48,6 +49,7 @@ class WebsiteService:
                 )
                 if loc.text and not loc.text.endswith(".pdf")
             ]
+            logger.info(f"Urls found {len(urls)}")
             return urls
 
         except Exception as e:
@@ -95,6 +97,7 @@ class WebsiteService:
 
                 if unique_chunks:
                     await self.indexer.vector_store.aadd_documents(unique_chunks)
+                    logger.info(f"Added {len(unique_chunks)} for {url}")
                 return True
 
         except Exception as e:
