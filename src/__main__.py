@@ -16,6 +16,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.routes import agent, document, website, wiki
+from src.utils.logger import logger
+from src.services.assiatant import run_assiatant
 
 
 def create_app() -> FastAPI:
@@ -68,6 +70,10 @@ def create_app() -> FastAPI:
     application.include_router(document.router)
     application.include_router(agent.router)
 
+    logger.info("Running assiatant")
+    run_assiatant()
+    logger.info("Completed assiatant")
+
     return application
 
 
@@ -82,6 +88,7 @@ if __name__ == "__main__":
     Run the application using uvicorn server with hot reload enabled
     for development purposes.
     """
+
     uvicorn.run(
         app=app,
         host="0.0.0.0",
