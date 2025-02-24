@@ -1,16 +1,19 @@
 from dotenv import load_dotenv
-from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits import SQLDatabaseToolkit
-from langchain_groq import ChatGroq
-from langchain_core.tools import tool
 from langchain import hub
-from langchain_openai import ChatOpenAI
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.utilities import SQLDatabase
+from langchain_core.tools import tool
+from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
+from langchain_openai import AzureChatOpenAI
+
 from src.services.sql.agent import create_react_agent
 
 load_dotenv()
 
-db = SQLDatabase.from_uri("postgresql://postgres:Amadis%40123@192.168.1.93:5432/llm_chat")
+db = SQLDatabase.from_uri(
+    "postgresql://postgres:Amadis%40123@192.168.1.93:5432/llm_chat"
+)
 # llm = ChatGroq(model="deepseek-r1-distill-llama-70b", temperature=0)
 # llm = ChatGroq(model="gemma2-9b-it", temperature=0)
 # llm = ChatGroq(model="mixtral-8x7b-32768", temperature=0)
@@ -18,7 +21,8 @@ db = SQLDatabase.from_uri("postgresql://postgres:Amadis%40123@192.168.1.93:5432/
 # llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 # llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 # llm = ChatOllama(model="llama3.2", temperature=0)
-llm = ChatOllama(model="llama3.3", temperature=0)
+# llm = ChatOllama(model="llama3-groq-tool-use:70b", temperature=0)
+llm = AzureChatOpenAI()
 
 system_message = """You are an agent designed to interact with a SQL database.
 Given an input question, create a syntactically correct postgresql query to run, then look at the results of the query and return the answer.
@@ -49,10 +53,11 @@ print(system_message)
 
 agent_executer = create_react_agent(llm, tools, prompt=system_message)
 
-question = "Give me all the low priority recommnedations?"
+question = "What is the average of total cost?"
+
 
 def sql_agent():
-    """"""""
+    """""" ""
     for step in agent_executer.stream(
         {"messages": [{"role": "user", "content": question}]},
         stream_mode="values",

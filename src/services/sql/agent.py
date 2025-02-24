@@ -24,9 +24,6 @@ from langchain_core.runnables import (
     RunnableConfig,
 )
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel
-from typing_extensions import Annotated, TypedDict
-
 from langgraph.errors import ErrorCode, create_error_message
 from langgraph.graph import END, StateGraph
 from langgraph.graph.graph import CompiledGraph
@@ -37,6 +34,8 @@ from langgraph.prebuilt.tool_node import ToolNode
 from langgraph.store.base import BaseStore
 from langgraph.types import Checkpointer, Send
 from langgraph.utils.runnable import RunnableCallable
+from pydantic import BaseModel
+from typing_extensions import Annotated, TypedDict
 
 StructuredResponse = Union[dict, BaseModel]
 StructuredResponseSchema = Union[dict, type[BaseModel]]
@@ -135,8 +134,7 @@ def _convert_messages_modifier_to_prompt(
         prompt = (lambda state: state["messages"]) | messages_modifier
         return prompt
     raise ValueError(
-        f"Got unexpected type for `messages_modifier`: {
-            type(messages_modifier)}"
+        f"Got unexpected type for `messages_modifier`: {type(messages_modifier)}"
     )
 
 
@@ -193,8 +191,7 @@ def _should_bind_tools(model: LanguageModelLike, tools: Sequence[BaseTool]) -> b
         bound_tool_names.add(bound_tool_name)
 
     if missing_tools := tool_names - bound_tool_names:
-        raise ValueError(f"Missing tools '{
-                         missing_tools}' in the model.bind_tools()")
+        raise ValueError(f"Missing tools '{missing_tools}' in the model.bind_tools()")
 
     return False
 
@@ -279,8 +276,7 @@ def create_react_agent(
             required_keys.add("structured_response")
 
         if missing_keys := required_keys - set(state_schema.__annotations__):
-            raise ValueError(f"Missing required key(s) {
-                             missing_keys} in state_schema")
+            raise ValueError(f"Missing required key(s) {missing_keys} in state_schema")
 
     if state_schema is None:
         print("============================= No State Scheme =====================")
@@ -334,15 +330,20 @@ def create_react_agent(
 
     # Define the function that calls the model
     def call_model(state: AgentState, config: RunnableConfig) -> AgentState:
-        print(f"=================== Calling model with AgenntState ========================= \n\n {state}\n\n")
+        print(
+            f"=================== Calling model with AgenntState ========================= \n\n {state}\n\n"
+        )
         _validate_chat_history(state["messages"])
         response = cast(AIMessage, model_runnable.invoke(state, config))
-        print(f"===============================Model Response ==========================\n\n {response}\n\n")
+        print(
+            f"===============================Model Response ==========================\n\n {response}\n\n"
+        )
         # add agent name to the AIMessage
         response.name = name
-        has_tool_calls = isinstance(
-            response, AIMessage) and response.tool_calls
-        print(f"========================Has tool call ==============\n\n {has_tool_calls} \n\n")
+        has_tool_calls = isinstance(response, AIMessage) and response.tool_calls
+        print(
+            f"========================Has tool call ==============\n\n {has_tool_calls} \n\n"
+        )
         all_tools_return_direct = (
             all(call["name"] in should_return_direct for call in response.tool_calls)
             if isinstance(response, AIMessage)
@@ -381,8 +382,7 @@ def create_react_agent(
         response = cast(AIMessage, await model_runnable.ainvoke(state, config))
         # add agent name to the AIMessage
         response.name = name
-        has_tool_calls = isinstance(
-            response, AIMessage) and response.tool_calls
+        has_tool_calls = isinstance(response, AIMessage) and response.tool_calls
         all_tools_return_direct = (
             all(call["name"] in should_return_direct for call in response.tool_calls)
             if isinstance(response, AIMessage)
@@ -493,8 +493,7 @@ def create_react_agent(
                 return [Send("tools", [tool_call]) for tool_call in tool_calls]
 
     # Define a new graph
-    workflow = StateGraph(state_schema or AgentState,
-                          config_schema=config_schema)
+    workflow = StateGraph(state_schema or AgentState, config_schema=config_schema)
 
     # Define the two nodes we will cycle between
     workflow.add_node("agent", RunnableCallable(call_model, acall_model))
@@ -513,8 +512,7 @@ def create_react_agent(
             ),
         )
         workflow.add_edge("generate_structured_response", END)
-        should_continue_destinations = [
-            "tools", "generate_structured_response"]
+        should_continue_destinations = ["tools", "generate_structured_response"]
     else:
         should_continue_destinations = ["tools", END]
 

@@ -16,9 +16,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.routes import agent, document, website, wiki
-from src.utils.logger import logger
-
 from src.services.sql.sql import sql_agent
+from src.utils.logger import logger
 
 
 def create_app() -> FastAPI:
@@ -70,8 +69,8 @@ def create_app() -> FastAPI:
     application.include_router(wiki.router)
     application.include_router(document.router)
     application.include_router(agent.router)
-    
-    sql_agent()
+
+    # sql_agent()
 
     return application
 
